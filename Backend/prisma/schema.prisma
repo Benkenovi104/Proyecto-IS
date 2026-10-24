@@ -1,0 +1,365 @@
+// Modelo de dominio de TicketFr.
+// Traducción directa de la "Vista 2: Clases" del Caso Integrador (CasoIntegradorIS-Purro-Saieva.md).
+// SQLite no tiene enums: los estados se guardan como String y sus valores posibles
+// están definidos en src/domain/enums.ts (mismas enumeraciones que el punto 2.3).
+// Los importes se guardan en pesos enteros (Int).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 2.2 Jerarquía de usuarios ────────────────────────────────────────────────
+// Usuario es abstracta; se persiste en una sola tabla con el discriminador `rol`
+// (ADMINISTRADOR | ORGANIZADOR | COMPRADOR | CONTROLADOR).
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  rol          String
+  activo       Boolean  @default(true)
+  nombre       String
+  dni          String?  @unique // Comprador
+  productora   String? // Organizador
+  puntoAcceso  String? // ControladorAcceso
+  creadoEn     DateTime @default(now())
+
+  eventos                 Evento[]
+  compras                 Compra[]
+  entradas                Entrada[]              @relation("TitularActual")
+  transferenciasCedidas   TransferenciaEntrada[] @relation("Cedente")
+  transferenciasRecibidas TransferenciaEntrada[] @relation("Destinatario")
+  validaciones            ValidacionAcceso[]
+}
+
+// ─── Salas, escenario y sectores (Administrador) ─────────────────────────────
+model Sala {
+  id        Int    @id @default(autoincrement())
+  codigo    String @unique
+  nombre    String
+  direccion String
+  capacidad Int
+  // Tamaño del lienzo del editor gráfico (px)
+  ancho     Int    @default(860)
+  alto      Int    @default(640)
+
+  sectores   Sector[]
+  escenarios Escenario[]
+  playas     PlayaEstacionamiento[]
+  funciones  Funcion[]
+}
+
+model Escenario {
+  id          Int     @id @default(autoincrement())
+  salaId      Int
+  nombre      String
+  esBase      Boolean @default(false)
+  posX        Float
+  posY        Float
+  ancho       Float
+  alto        Float
+  poligonoSVG String?
+
+  sala      Sala      @relation(fields: [salaId], references: [id], onDelete: Cascade)
+  funciones Funcion[]
+}
+
+model Sector {
+  id             Int     @id @default(autoincrement())
+  salaId         Int
+  codigo         String
+  nombre         String
+  numerado       Boolean
+  cupoMaximo     Int
+  filas          Int     @default(0)
+  butacasPorFila Int     @default(0)
+  color          String  @default("indigo")
+  forma          String  @default("RECT") // RECT | TRAPECIO | ARCO
+  posX           Float
+  posY           Float
+  ancho          Float
+  alto           Float
+  poligonoSVG    String?
+  puertaAcceso   String?
+
+  sala     Sala      @relation(fields: [salaId], references: [id], onDelete: Cascade)
+  butacas  Butaca[]
+  tarifas  Tarifa[]
+  entradas Entrada[]
+
+  @@unique([salaId, codigo])
+}
+
+model Butaca {
+  id       Int    @id @default(autoincrement())
+  sectorId Int
+  fila     String
+  numero   Int
+  // Posición relativa dentro del sector (0..1), así mover el sector no obliga a recalcular butacas
+  posX     Float
+  posY     Float
+
+  sector   Sector    @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  entradas Entrada[]
+
+  @@unique([sectorId, fila, numero])
+}
+
+model PlayaEstacionamiento {
+  id             Int     @id @default(autoincrement())
+  salaId         Int
+  nombre         String
+  capacidadTotal Int
+  usoExclusivo   Boolean @default(false)
+  habilitada     Boolean @default(true)
+
+  sala    Sala                    @relation(fields: [salaId], references: [id], onDelete: Cascade)
+  tarifas TarifaEstacionamiento[]
+}
+
+// ─── Eventos y funciones (Organizador) ───────────────────────────────────────
+model Evento {
+  id            Int     @id @default(autoincrement())
+  organizadorId Int
+  nombre        String
+  categoria     String // RECITAL | TEATRO | DEPORTE | OTRO
+  descripcion   String?
+
+  organizador Usuario               @relation(fields: [organizadorId], references: [id])
+  funciones   Funcion[]
+  productos   ProductoConsumicion[]
+}
+
+model Funcion {
+  id            Int      @id @default(autoincrement())
+  codigo        String   @unique
+  eventoId      Int
+  salaId        Int
+  escenarioId   Int
+  fechaHora     DateTime
+  estado        String   @default("BORRADOR") // EstadoFuncion
+  exigePatente  Boolean  @default(true)
+  aperturaPlaya String?
+
+  evento                 Evento                  @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  sala                   Sala                    @relation(fields: [salaId], references: [id])
+  escenario              Escenario               @relation(fields: [escenarioId], references: [id])
+  tarifas                Tarifa[]
+  tarifasEstacionamiento TarifaEstacionamiento[]
+  compras                Compra[]
+  entradas               Entrada[]
+  validaciones           ValidacionAcceso[]
+}
+
+model Tarifa {
+  id        Int @id @default(autoincrement())
+  funcionId Int
+  sectorId  Int
+  precio    Int
+
+  funcion    Funcion     @relation(fields: [funcionId], references: [id], onDelete: Cascade)
+  sector     Sector      @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  descuentos Descuento[]
+
+  @@unique([funcionId, sectorId])
+}
+
+model Descuento {
+  id            Int      @id @default(autoincrement())
+  tarifaId      Int
+  porcentaje    Float
+  vigenciaDesde DateTime
+  vigenciaHasta DateTime
+  descripcion   String?
+
+  tarifa Tarifa @relation(fields: [tarifaId], references: [id], onDelete: Cascade)
+}
+
+model TarifaEstacionamiento {
+  id             Int @id @default(autoincrement())
+  funcionId      Int
+  playaId        Int
+  precio         Int
+  cupoHabilitado Int
+
+  funcion Funcion               @relation(fields: [funcionId], references: [id], onDelete: Cascade)
+  playa   PlayaEstacionamiento  @relation(fields: [playaId], references: [id], onDelete: Cascade)
+  pases   PaseEstacionamiento[]
+
+  @@unique([funcionId, playaId])
+}
+
+model ProductoConsumicion {
+  id              Int     @id @default(autoincrement())
+  eventoId        Int
+  nombre          String
+  descripcion     String?
+  precioPreventa  Int
+  precioLista     Int? // precio en barra, para mostrar el ahorro de la preventa
+  stockDisponible Int
+  activo          Boolean @default(true)
+
+  evento Evento            @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  items  ItemConsumicion[]
+}
+
+// ─── Compras y adicionales (Comprador) ───────────────────────────────────────
+model Compra {
+  id                     Int       @id @default(autoincrement())
+  codigo                 String    @unique
+  compradorId            Int
+  funcionId              Int
+  fecha                  DateTime  @default(now())
+  fechaExpiracionReserva DateTime
+  reservaExtendida       Boolean   @default(false)
+  estado                 String // EstadoCompra
+  idTransaccionPago      String?
+  fechaPago              DateTime?
+
+  comprador  Usuario               @relation(fields: [compradorId], references: [id])
+  funcion    Funcion               @relation(fields: [funcionId], references: [id])
+  entradas   Entrada[]
+  pases      PaseEstacionamiento[]
+  voucher    VoucherConsumicion?
+  reembolsos Reembolso[]
+}
+
+model Entrada {
+  id          Int       @id @default(autoincrement())
+  compraId    Int
+  funcionId   Int
+  sectorId    Int
+  butacaId    Int?
+  titularId   Int
+  codigoQR    String?   @unique // se emite al aprobarse el pago
+  precio      Int
+  estado      String    @default("VIGENTE") // EstadoEntrada
+  usadaEn     DateTime?
+  reembolsoId Int?
+
+  compra         Compra                 @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  funcion        Funcion                @relation(fields: [funcionId], references: [id])
+  sector         Sector                 @relation(fields: [sectorId], references: [id])
+  butaca         Butaca?                @relation(fields: [butacaId], references: [id])
+  titular        Usuario                @relation("TitularActual", fields: [titularId], references: [id])
+  reembolso      Reembolso?             @relation(fields: [reembolsoId], references: [id])
+  transferencias TransferenciaEntrada[]
+}
+
+model PaseEstacionamiento {
+  id       Int       @id @default(autoincrement())
+  compraId Int
+  tarifaId Int
+  patente  String
+  codigoQR String?   @unique
+  precio   Int
+  estado   String    @default("VIGENTE")
+  usadoEn  DateTime?
+
+  compra Compra                @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  tarifa TarifaEstacionamiento @relation(fields: [tarifaId], references: [id])
+}
+
+model VoucherConsumicion {
+  id         Int       @id @default(autoincrement())
+  compraId   Int       @unique
+  codigoQR   String?   @unique
+  pin        String
+  estado     String    @default("VIGENTE")
+  canjeadoEn DateTime?
+
+  compra Compra            @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  items  ItemConsumicion[]
+}
+
+model ItemConsumicion {
+  id             Int @id @default(autoincrement())
+  voucherId      Int
+  productoId     Int
+  cantidad       Int
+  precioUnitario Int
+
+  voucher  VoucherConsumicion  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  producto ProductoConsumicion @relation(fields: [productoId], references: [id])
+}
+
+// ─── Transferencias y reembolsos ─────────────────────────────────────────────
+model TransferenciaEntrada {
+  id             Int       @id @default(autoincrement())
+  entradaId      Int
+  cedenteId      Int
+  destinatarioId Int
+  fechaHora      DateTime  @default(now())
+  estado         String    @default("PENDIENTE") // EstadoTransferencia
+  fechaRespuesta DateTime?
+
+  entrada      Entrada @relation(fields: [entradaId], references: [id], onDelete: Cascade)
+  cedente      Usuario @relation("Cedente", fields: [cedenteId], references: [id])
+  destinatario Usuario @relation("Destinatario", fields: [destinatarioId], references: [id])
+}
+
+model Reembolso {
+  id                     Int      @id @default(autoincrement())
+  compraId               Int
+  fechaSolicitud         DateTime @default(now())
+  montoReintegrado       Int
+  motivo                 String
+  estado                 String // EstadoReembolso
+  idTransaccionReintegro String?
+
+  compra   Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  entradas Entrada[]
+}
+
+// ─── Derecho de admisión ─────────────────────────────────────────────────────
+model RegistroListaNegra {
+  id        Int      @id @default(autoincrement())
+  dni       String   @unique
+  nombre    String?
+  motivo    String
+  fechaAlta DateTime @default(now())
+}
+
+// ─── Soporte técnico (no figuran en el diagrama de clases) ───────────────────
+// Historial de códigos QR anulados, para que el control de acceso pueda informar
+// "anulado por transferencia/reembolso" en lugar de "inexistente" (riesgo R-03).
+model CodigoRevocado {
+  codigo       String   @id
+  tipo         String // ENTRADA | PASE | VOUCHER
+  motivo       String // TRANSFERENCIA | REEMBOLSO
+  referenciaId Int
+  fecha        DateTime @default(now())
+}
+
+// Bitácora de escaneos del controlador de acceso.
+model ValidacionAcceso {
+  id            Int      @id @default(autoincrement())
+  funcionId     Int?
+  controladorId Int
+  punto         String // PUERTA | ESTACIONAMIENTO | BARRA
+  codigo        String
+  tipo          String? // ENTRADA | PASE | VOUCHER
+  resultado     String // APROBADO | RECHAZADO
+  motivo        String?
+  titular       String?
+  ubicacion     String?
+  latenciaMs    Int      @default(0)
+  offline       Boolean  @default(false)
+  fechaHora     DateTime @default(now())
+
+  funcion     Funcion? @relation(fields: [funcionId], references: [id])
+  controlador Usuario  @relation(fields: [controladorId], references: [id])
+}
+
+// Bandeja del servicio de mailing (simulado).
+model Notificacion {
+  id     Int      @id @default(autoincrement())
+  para   String
+  asunto String
+  cuerpo String
+  fecha  DateTime @default(now())
+}

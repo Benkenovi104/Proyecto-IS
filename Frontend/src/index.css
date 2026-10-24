@@ -1,0 +1,89 @@
+@import '@fontsource-variable/inter';
+@import 'material-symbols/outlined.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    overscroll-behavior: none;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  /* Cifras tabulares en importes, cupos y contadores (guía Nocturne Velocity) */
+  .font-mono,
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background: #4f46e5;
+    color: #fff;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0e17;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #262a34;
+    border-radius: 3px;
+  }
+  :focus-visible {
+    outline: 2px solid #4f46e5;
+    outline-offset: 2px;
+  }
+}
+
+/* "Descargar QR (PDF)" en Mis Compras: se imprime solo la orden elegida, con los colores de pantalla */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body > #root > header,
+  body.imprimiendo main > :not(article[data-imprimir]),
+  article[data-imprimir] button,
+  article[data-imprimir] form,
+  article[data-imprimir] section {
+    display: none !important;
+  }
+}
+
+@layer components {
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    line-height: 1;
+    user-select: none;
+  }
+  .icono-relleno {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+
+  /* Campos de formulario (guía: fondo #0b0f19, borde #232f48, foco violeta) */
+  .campo {
+    @apply w-full rounded-lg border border-nv-line bg-nv-page px-3 py-2 text-body-md text-slate-50 placeholder:text-slate-500 transition-colors focus:border-primary-container focus:outline-none focus:ring-0 focus:shadow-glow disabled:opacity-60;
+  }
+  .campo-mono {
+    @apply campo font-mono;
+  }
+  .etiqueta {
+    @apply mb-1 block font-sans text-label-xs uppercase text-outline;
+  }
+
+  /* Lienzo del editor de sala (patrón de cuadrícula de la pantalla 1 de Stitch) */
+  .cuadricula-cad {
+    background-color: #080c14;
+    background-image:
+      radial-gradient(circle, rgba(99, 102, 241, 0.18) 1px, transparent 1px),
+      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 20px 20px, 100px 100px, 100px 100px;
+  }
+}

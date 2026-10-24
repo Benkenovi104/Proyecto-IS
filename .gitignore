@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.env
+Backend/prisma/*.db
+Backend/prisma/*.db-journal
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

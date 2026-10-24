@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TicketFr - Plataforma Integral de Venta de Entradas</title>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Phosphor Icons CDN -->
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            accent: {
+              teal: '#14b8a6',
+              amber: '#f59e0b',
+              emerald: '#10b981',
+              rose: '#f43f5e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.4); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.8); }
+    
+    .seat-selected { animation: pulseGlow 1.5s infinite; }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 10px rgba(99, 102, 241, 0.8); }
+      50% { box-shadow: 0 0 20px rgba(129, 140, 248, 1); }
+    }
+    .scanner-laser {
+      animation: scanMove 2s ease-in-out infinite alternate;
+    }
+    @keyframes scanMove {
+      0% { top: 10%; opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { top: 90%; opacity: 0.4; }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+<!-- ================= TOP PERSISTENT ROLE SWITCHER BAR ================= -->
+<header class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-xl">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+<!-- Brand Logo -->
+<div class="flex items-center gap-3 cursor-pointer" onclick="switchRole('buyer')">
+<div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-teal-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+<i class="ph-bold ph-ticket text-2xl text-white"></i>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">TicketFr</span>
+<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">PROTOTYPE</span>
+</div>
+<p class="text-xs text-slate-400 hidden sm:block">Portal Integral de Espectáculos</p>
+</div>
+</div>
+<!-- ROLE SELECTOR TABS -->
+<nav class="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 shadow-inner">
+<button class="role-btn px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-1.5 text-slate-400 hover:text-white" id="tab-admin" onclick="switchRole('admin')">
+<i class="ph ph-shield-check text-base"></i>
+<span>1. Administrador</span>
+</button>
+<button class="role-btn px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-1.5 text-slate-400 hover:text-white" id="tab-organizer" onclick="switchRole('organizer')">
+<i class="ph ph-calendar-plus text-base"></i>
+<span>2. Organizador</span>
+</button>
+<button class="role-btn px-3.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition-all flex items-center gap-1.5 bg-indigo-600 text-white shadow-md shadow-indigo-600/30" id="tab-buyer" onclick="switchRole('buyer')">
+<i class="ph-fill ph-storefront text-base"></i>
+<span>3. Comprador</span>
+</button>
+<button class="role-btn px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-1.5 text-slate-400 hover:text-white" id="tab-controller" onclick="switchRole('controller')">
+<i class="ph ph-qr-code text-base"></i>
+<span>4. Controlador</span>
+</button>
+</nav>
+<!-- Active User & Session Meta -->
+<div class="flex items-center gap-3">
+<div class="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs text-slate-300" id="role-badge">
+<span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+<span id="role-badge-text">Vista Activa: Comprador</span>
+</div>
+<div class="w-8 h-8 rounded-full bg-indigo-950 border border-indigo-500/40 text-indigo-300 flex items-center justify-center font-bold text-xs" title="Sesión demo">
+          TF
+        </div>
+</div>
+</div>
+</header>
+<!-- ================= NOTIFICATION TOAST ================= -->
+<div class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl" id="toast">
+<div class="text-xl text-teal-400" id="toast-icon"><i class="ph-bold ph-check-circle"></i></div>
+<div class="text-sm font-medium text-slate-200" id="toast-msg">Acción realizada exitosamente</div>
+</div>
+<!-- ================= MAIN CONTENT WRAPPER ================= -->
+<main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+<!-- ============================================================== -->
+<!-- 1. VISTA ADMINISTRADOR (BACKOFFICE: SALAS, MAPA & PLAYAS)       -->
+<!-- ============================================================== -->
+<section class="space-y-6 hidden" id="view-admin">
+<!-- Section Header -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+<div>
+<div class="flex items-center gap-2">
+<span class="px-2.5 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-semibold uppercase">Backoffice Admin</span>
+<h1 class="text-2xl font-bold tracking-tight text-white">Gestor de Salas, Escenarios y Playas</h1>
+</div>
+<p class="text-sm text-slate-400 mt-1">Configuración arquitectónica de salas, dibujo de polígonos del escenario, sectores numerados/generales y capacidad de playas.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition flex items-center gap-1.5" onclick="showToast('Sincronizando cambios de sala en base de datos...', 'info')">
+<i class="ph ph-arrow-counter-clockwise"></i> Descartar
+          </button>
+<button class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition flex items-center gap-2" onclick="saveAdminRoomSetup()">
+<i class="ph-bold ph-floppy-disk"></i> Guardar Configuración de Sala
+          </button>
+</div>
+</div>
+<!-- 2-Column Layout: Room Data & Interactive Stage Editor -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Left: Sala Info & Playa de Estacionamiento -->
+<div class="lg:col-span-4 space-y-6">
+<!-- Sala Card -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
+<i class="ph-bold ph-buildings text-indigo-400 text-base"></i> Datos de la Sala
+              </h3>
+<span class="text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded">ID #SAL-04</span>
+</div>
+<div class="space-y-3">
+<div>
+<label class="block text-xs font-medium text-slate-400 mb-1">Nombre de la Sala / Estadio</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition" id="admin-sala-name" type="text" value="Estadio Luna Central - Sala Principal"/>
+</div>
+<div>
+<label class="block text-xs font-medium text-slate-400 mb-1">Dirección y Localidad</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition" id="admin-sala-dir" type="text" value="Av. Madero 420, CABA"/>
+</div>
+</div>
+</div>
+<!-- Playa Estacionamiento Card (Gestión integral del caso) -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
+<i class="ph-bold ph-car text-teal-400 text-base"></i> Playas de Estacionamiento de Sala
+              </h3>
+<span class="text-xs text-slate-400">2 Playas asociadas</span>
+</div>
+<div class="space-y-3">
+<div class="p-3 bg-slate-950/70 rounded-xl border border-slate-800 flex items-center justify-between">
+<div>
+<div class="font-medium text-xs text-slate-200">Playa Norte (Subsuelo A)</div>
+<div class="text-[11px] text-slate-400">Capacidad Total: <span class="text-teal-400 font-semibold">250 vehículos</span></div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-300 border border-teal-500/30">Habilitada</span>
+</div>
+<div class="p-3 bg-slate-950/70 rounded-xl border border-slate-800 flex items-center justify-between">
+<div>
+<div class="font-medium text-xs text-slate-200">Playa Este (Descubierta)</div>
+<div class="text-[11px] text-slate-400">Capacidad Total: <span class="text-teal-400 font-semibold">180 vehículos</span></div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-300 border border-teal-500/30">Habilitada</span>
+</div>
+<div class="pt-2 border-t border-slate-800 flex items-center gap-2">
+<input class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none" placeholder="Nueva playa..." type="text"/>
+<input class="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none" placeholder="Cap." type="number"/>
+<button class="p-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs" onclick="showToast('Nueva playa registrada', 'success')">
+<i class="ph-bold ph-plus"></i>
+</button>
+</div>
+</div>
+</div>
+<!-- Inspector del Elemento Seleccionado en Canvas -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+<h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
+<i class="ph-bold ph-sliders text-amber-400 text-base"></i> Propiedades del Sector / Escenario
+            </h3>
+<div class="space-y-3 text-xs" id="admin-inspector">
+<div class="p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl text-indigo-300">
+                Elemento Activo: <strong class="text-white" id="insp-title">Escenario Principal</strong>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<div>
+<label class="block text-slate-400 mb-1">Pos X (px)</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200" id="insp-posx" onchange="updateStageVisual()" type="number" value="220"/>
+</div>
+<div>
+<label class="block text-slate-400 mb-1">Pos Y (px)</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200" id="insp-posy" onchange="updateStageVisual()" type="number" value="20"/>
+</div>
+<div>
+<label class="block text-slate-400 mb-1">Ancho (W)</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200" id="insp-w" onchange="updateStageVisual()" type="number" value="360"/>
+</div>
+<div>
+<label class="block text-slate-400 mb-1">Alto (H)</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200" id="insp-h" onchange="updateStageVisual()" type="number" value="80"/>
+</div>
+</div>
+<div class="space-y-2 pt-2 border-t border-slate-800">
+<div class="flex items-center justify-between">
+<span class="text-slate-300 font-medium">Tipo de Ubicación:</span>
+<div class="flex items-center gap-2">
+<span class="text-teal-400 font-semibold" id="insp-type-label">Numerado</span>
+<button class="w-10 h-5 bg-teal-600 rounded-full relative p-0.5 transition" id="insp-toggle-btn" onclick="toggleSectorNumeration()" type="button">
+<div class="w-4 h-4 bg-white rounded-full transition transform translate-x-5" id="insp-toggle-dot"></div>
+</button>
+</div>
+</div>
+<p class="text-[11px] text-slate-400" id="insp-type-desc">Genera filas y butacas específicas con coordenadas exactas.</p>
+</div>
+<div>
+<label class="block text-slate-400 mb-1">Cupo Máximo / Capacidad</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200" id="insp-cap" type="number" value="480"/>
+</div>
+</div>
+</div>
+</div>
+<!-- Right: 2D Interactive Stage & Sector Canvas Editor -->
+<div class="lg:col-span-8 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col">
+<div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+<h3 class="font-semibold text-slate-200 text-sm">Editor Gráfico 2D de Sala (SVG / Vectorial)</h3>
+</div>
+<!-- Editor Toolbar -->
+<div class="flex items-center gap-2">
+<button class="px-2.5 py-1 rounded bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs hover:bg-indigo-600/50 flex items-center gap-1" onclick="selectElementToInspect('escenario')">
+<i class="ph ph-selection"></i> Escenario
+              </button>
+<button class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 text-xs hover:bg-slate-700 flex items-center gap-1" onclick="selectElementToInspect('platea')">
+<i class="ph ph-armchair"></i> Platea Baja
+              </button>
+<button class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 text-xs hover:bg-slate-700 flex items-center gap-1" onclick="selectElementToInspect('campo')">
+<i class="ph ph-users-three"></i> Campo General
+              </button>
+<button class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 text-xs hover:bg-slate-700 flex items-center gap-1" onclick="selectElementToInspect('pullman')">
+<i class="ph ph-rows"></i> Pullman Alto
+              </button>
+</div>
+</div>
+<!-- SVG Canvas Area -->
+<div class="mt-4 flex-1 bg-slate-950 rounded-xl border border-slate-800 p-4 relative overflow-hidden min-h-[460px] flex items-center justify-center">
+<svg class="w-full h-full max-h-[500px] select-none" id="admin-svg-canvas" viewbox="0 0 800 520">
+<!-- Grid background pattern -->
+<defs>
+<pattern height="20" id="grid" patternunits="userSpaceOnUse" width="20">
+<path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1e293b" stroke-width="0.75"></path>
+</pattern>
+<lineargradient id="gradStage" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#4f46e5"></stop>
+<stop offset="100%" stop-color="#312e81"></stop>
+</lineargradient>
+</defs>
+<rect fill="url(#grid)" height="520" width="800"></rect>
+<!-- ESCENARIO POLIGONAL -->
+<g class="cursor-pointer transition transform hover:opacity-95" id="svg-stage-group" onclick="selectElementToInspect('escenario')">
+<rect fill="url(#gradStage)" height="70" id="svg-stage-rect" rx="8" stroke="#818cf8" stroke-width="2" width="360" x="220" y="25"></rect>
+<path d="M 220 95 L 300 120 L 500 120 L 580 95 Z" fill="#3730a3" stroke="#818cf8" stroke-width="1.5"></path>
+<text fill="#ffffff" font-size="14" font-weight="700" letter-spacing="2" text-anchor="middle" x="400" y="65">ESCENARIO PRINCIPAL</text>
+<text fill="#c7d2fe" font-size="10" text-anchor="middle" x="400" y="82">Área de Concierto / Show (X:220, Y:25)</text>
+</g>
+<!-- SECTOR 1: PLATEA VIP PREFERENCIAL (Numerado) -->
+<g class="cursor-pointer hover:opacity-95" id="svg-platea-group" onclick="selectElementToInspect('platea')">
+<rect fill="#1e1b4b" height="100" rx="8" stroke="#6366f1" stroke-dasharray="4,2" stroke-width="2" width="300" x="250" y="145"></rect>
+<text fill="#a5b4fc" font-size="12" font-weight="bold" text-anchor="middle" x="400" y="170">SECTOR PLATEA PREFERENCIAL</text>
+<text fill="#64748b" font-size="10" text-anchor="middle" x="400" y="185">Numerado • Filas A - J • 300 Butacas</text>
+<!-- Sample rows of seats -->
+<g fill="#4338ca" stroke="#6366f1" stroke-width="1">
+<!-- Row 1 -->
+<circle cx="280" cy="205" r="5"></circle> <circle cx="300" cy="205" r="5"></circle> <circle cx="320" cy="205" r="5"></circle> <circle cx="340" cy="205" r="5"></circle>
+<circle cx="360" cy="205" r="5"></circle> <circle cx="380" cy="205" r="5"></circle> <circle cx="400" cy="205" r="5"></circle> <circle cx="420" cy="205" r="5"></circle>
+<circle cx="440" cy="205" r="5"></circle> <circle cx="460" cy="205" r="5"></circle> <circle cx="480" cy="205" r="5"></circle> <circle cx="500" cy="205" r="5"></circle> <circle cx="520" cy="205" r="5"></circle>
+<!-- Row 2 -->
+<circle cx="280" cy="225" r="5"></circle> <circle cx="300" cy="225" r="5"></circle> <circle cx="320" cy="225" r="5"></circle> <circle cx="340" cy="225" r="5"></circle>
+<circle cx="360" cy="225" r="5"></circle> <circle cx="380" cy="225" r="5"></circle> <circle cx="400" cy="225" r="5"></circle> <circle cx="420" cy="225" r="5"></circle>
+<circle cx="440" cy="225" r="5"></circle> <circle cx="460" cy="225" r="5"></circle> <circle cx="480" cy="225" r="5"></circle> <circle cx="500" cy="225" r="5"></circle> <circle cx="520" cy="225" r="5"></circle>
+</g>
+</g>
+<!-- SECTOR 2: CAMPO GENERAL (Sin numerar) -->
+<g class="cursor-pointer hover:opacity-95" id="svg-campo-group" onclick="selectElementToInspect('campo')">
+<rect fill="#042f2e" height="110" rx="8" stroke="#14b8a6" stroke-width="2" width="440" x="180" y="265"></rect>
+<text fill="#2dd4bf" font-size="13" font-weight="bold" text-anchor="middle" x="400" y="315">CAMPO GENERAL DE PIE</text>
+<text fill="#99f6e4" font-size="10" text-anchor="middle" x="400" y="335">General Sin Numerar • Cupo Máximo: 2.500 Personas</text>
+<text fill="#5eead4" font-size="9" text-anchor="middle" x="400" y="352">(Acceso por orden de llegada con validación QR)</text>
+</g>
+<!-- SECTOR 3: PULLMAN ALTO (Numerado) -->
+<g class="cursor-pointer hover:opacity-95" id="svg-pullman-group" onclick="selectElementToInspect('pullman')">
+<path d="M 120 395 L 680 395 L 640 495 L 160 495 Z" fill="#1e293b" stroke="#f59e0b" stroke-width="2"></path>
+<text fill="#fbbf24" font-size="12" font-weight="bold" text-anchor="middle" x="400" y="440">PULLMAN ALTO &amp; PALCOS LATERALES</text>
+<text fill="#fde68a" font-size="10" text-anchor="middle" x="400" y="460">Numerado • Grada Elevada • 850 Butacas</text>
+</g>
+</svg>
+<!-- Overlay legend -->
+<div class="absolute bottom-3 left-3 bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 text-[11px] flex items-center gap-4 text-slate-300">
+<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-indigo-500"></span> Escenario</div>
+<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-indigo-900 border border-indigo-400"></span> Numerado</div>
+<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-teal-900 border border-teal-400"></span> Sin Numerar (Cupo)</div>
+<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-amber-900 border border-amber-400"></span> Pullman</div>
+</div>
+</div>
+<div class="mt-3 flex items-center justify-between text-xs text-slate-400">
+<span>Haz clic sobre el escenario o sectores para cargar sus propiedades geométricas en el panel izquierdo.</span>
+<span class="text-indigo-400 font-medium">Resolución: 800 x 520 px SVG</span>
+</div>
+</div>
+</div>
+</section>
+<!-- ============================================================== -->
+<!-- 2. VISTA ORGANIZADOR (EVENTOS, FUNCIONES, PREVENTA & DASHBOARD) -->
+<!-- ============================================================== -->
+<section class="space-y-6 hidden" id="view-organizer">
+<!-- Section Header -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+<div>
+<div class="flex items-center gap-2">
+<span class="px-2.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold uppercase">Backoffice Productora</span>
+<h1 class="text-2xl font-bold tracking-tight text-white">Gestor de Eventos, Tarifas y Preventa</h1>
+</div>
+<p class="text-sm text-slate-400 mt-1">Publicación de funciones, precios por sector, asignación de estacionamiento, catálogo de consumiciones y analítica.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition flex items-center gap-2" id="btn-publish-function" onclick="toggleEventPublication()">
+<i class="ph-bold ph-globe"></i> <span id="publish-status-text">Función Publicada (Visible)</span>
+</button>
+</div>
+</div>
+<!-- Quick Metrics Grid -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow">
+<div class="text-xs text-slate-400">Recaudación Total</div>
+<div class="text-xl font-bold text-white mt-1">$ 14.850.000</div>
+<div class="text-[11px] text-emerald-400 flex items-center gap-1 mt-1 font-medium">
+<i class="ph-bold ph-trend-up"></i> +18.4% vs función anterior
+          </div>
+</div>
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow">
+<div class="text-xs text-slate-400">Entradas Vendidas</div>
+<div class="text-xl font-bold text-indigo-400 mt-1">2.940 <span class="text-xs font-normal text-slate-400">/ 3.650</span></div>
+<div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+<div class="bg-indigo-500 h-full w-[80%]"></div>
+</div>
+</div>
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow">
+<div class="text-xs text-slate-400">Pases Estacionamiento</div>
+<div class="text-xl font-bold text-teal-400 mt-1">320 <span class="text-xs font-normal text-slate-400">/ 430 cupo</span></div>
+<div class="text-[11px] text-teal-400 flex items-center gap-1 mt-1 font-medium">
+<i class="ph-bold ph-car"></i> 74% ocupación anticipada
+          </div>
+</div>
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow">
+<div class="text-xs text-slate-400">Preventa Consumiciones</div>
+<div class="text-xl font-bold text-amber-400 mt-1">$ 2.340.000</div>
+<div class="text-[11px] text-amber-400 flex items-center gap-1 mt-1 font-medium">
+<i class="ph-bold ph-fork-knife"></i> 1.150 vouchers emitidos
+          </div>
+</div>
+</div>
+<!-- Main Organizer Workflow: 3 Cards Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Card 1: Evento y Función -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow space-y-4">
+<div class="flex items-center justify-between pb-2 border-b border-slate-800">
+<h3 class="font-semibold text-white text-sm flex items-center gap-2">
+<i class="ph-bold ph-sparkle text-indigo-400"></i> Evento y Función
+            </h3>
+<span class="text-[11px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded">Producción RockFest</span>
+</div>
+<div class="space-y-3">
+<div>
+<label class="block text-xs text-slate-400 mb-1">Nombre del Evento</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" type="text" value="Cosquín Rock 2025 - Gira Nacional"/>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">Categoría</label>
+<select class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+<option>Concierto / Recital</option>
+<option>Festival Masivo</option>
+<option>Teatro / Espectáculo</option>
+</select>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<div>
+<label class="block text-xs text-slate-400 mb-1">Fecha</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white" type="date" value="2025-05-18"/>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">Hora de Inicio</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white" type="time" value="21:00"/>
+</div>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">Ajuste de Escenario para esta Función</label>
+<div class="p-2.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between">
+<span class="text-xs text-slate-300">Layout de Escenario Específico</span>
+<span class="text-xs text-indigo-400 font-semibold cursor-pointer hover:underline" onclick="showToast('Editor de Escenario específico abierto para esta función', 'info')">Modificar Escenario</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 2: Tarifas por Sector & Estacionamiento -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow space-y-4">
+<div class="flex items-center justify-between pb-2 border-b border-slate-800">
+<h3 class="font-semibold text-white text-sm flex items-center gap-2">
+<i class="ph-bold ph-currency-dollar text-emerald-400"></i> Tarifas y Estacionamiento
+            </h3>
+<span class="text-[11px] text-slate-400">Por Función</span>
+</div>
+<div class="space-y-3">
+<div class="text-xs font-semibold text-slate-300">Precios por Sector:</div>
+<div class="flex items-center justify-between text-xs bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+<span class="text-indigo-300 font-medium">Platea Preferencial (VIP)</span>
+<div class="flex items-center gap-1">
+<span class="text-slate-500">$</span>
+<input class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-right text-xs text-emerald-400 font-bold" type="number" value="45000"/>
+</div>
+</div>
+<div class="flex items-center justify-between text-xs bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+<span class="text-teal-300 font-medium">Campo General</span>
+<div class="flex items-center gap-1">
+<span class="text-slate-500">$</span>
+<input class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-right text-xs text-emerald-400 font-bold" type="number" value="28000"/>
+</div>
+</div>
+<div class="flex items-center justify-between text-xs bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+<span class="text-amber-300 font-medium">Pullman Alto</span>
+<div class="flex items-center gap-1">
+<span class="text-slate-500">$</span>
+<input class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-right text-xs text-emerald-400 font-bold" type="number" value="34000"/>
+</div>
+</div>
+<!-- Estacionamiento Config -->
+<div class="pt-2 border-t border-slate-800">
+<div class="text-xs font-semibold text-slate-300 mb-2 flex items-center justify-between">
+<span>Pase Estacionamiento Anticipado:</span>
+<span class="text-teal-400 font-mono text-[11px]">Cupo Habilitado: 350</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<div>
+<label class="block text-[11px] text-slate-400 mb-0.5">Tarifa Pase ($)</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white" type="number" value="8500"/>
+</div>
+<div>
+<label class="block text-[11px] text-slate-400 mb-0.5">Cupo Exclusivo</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white" type="number" value="350"/>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 3: Catálogo de Consumiciones (Preventa) -->
+<div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow space-y-4">
+<div class="flex items-center justify-between pb-2 border-b border-slate-800">
+<h3 class="font-semibold text-white text-sm flex items-center gap-2">
+<i class="ph-bold ph-beer-bottle text-amber-400"></i> Catálogo de Consumiciones
+            </h3>
+<button class="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded hover:bg-amber-500/30" onclick="showToast('Nuevo combo gastronómico creado', 'success')">
+              + Agregar Item
+            </button>
+</div>
+<div class="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+<!-- Item 1 -->
+<div class="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+<div>
+<div class="text-xs font-semibold text-white">Combo Hamburguesa Doble + Cerveza</div>
+<div class="text-[11px] text-slate-400">Stock: <span class="text-teal-400 font-mono font-medium">350 disp.</span> • Preventa: <span class="text-amber-400 font-semibold">$ 9.500</span></div>
+</div>
+<span class="text-emerald-400 text-xs font-bold bg-emerald-500/10 px-2 py-1 rounded">Activo</span>
+</div>
+<!-- Item 2 -->
+<div class="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+<div>
+<div class="text-xs font-semibold text-white">Vaso Eco Recargable + 2 Cervezas IPA</div>
+<div class="text-[11px] text-slate-400">Stock: <span class="text-teal-400 font-mono font-medium">600 disp.</span> • Preventa: <span class="text-amber-400 font-semibold">$ 7.800</span></div>
+</div>
+<span class="text-emerald-400 text-xs font-bold bg-emerald-500/10 px-2 py-1 rounded">Activo</span>
+</div>
+<!-- Item 3 -->
+<div class="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+<div>
+<div class="text-xs font-semibold text-white">Combo Popcorn Gigante + Gaseosa 500ml</div>
+<div class="text-[11px] text-slate-400">Stock: <span class="text-teal-400 font-mono font-medium">200 disp.</span> • Preventa: <span class="text-amber-400 font-semibold">$ 5.500</span></div>
+</div>
+<span class="text-emerald-400 text-xs font-bold bg-emerald-500/10 px-2 py-1 rounded">Activo</span>
+</div>
+</div>
+<div class="p-3 bg-indigo-950/20 rounded-xl border border-indigo-500/20 text-[11px] text-indigo-300 flex items-center gap-2">
+<i class="ph-bold ph-info text-base text-indigo-400"></i>
+<span>La preventa se canjea en la Barra con el voucher QR independiente.</span>
+</div>
+</div>
+</div>
+</section>
+<!-- ============================================================== -->
+<!-- 3. VISTA COMPRADOR (PORTAL PÚBLICO: BÚSQUEDA, MAPA, CHECKOUT)   -->
+<!-- ============================================================== -->
+<section class="space-y-8" id="view-buyer">
+<!-- Sub-Tabs for Buyer: (1. Cartelera/Compra | 2. Mis Entradas y Reembolsos) -->
+<div class="flex items-center justify-between border-b border-slate-800 pb-4">
+<div class="flex items-center gap-2">
+<button class="px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-indigo-600 text-white flex items-center gap-2" id="subtab-catalog" onclick="setBuyerSubTab('catalog')">
+<i class="ph-bold ph-compass"></i> Cartelera y Compra Interactiva
+          </button>
+<button class="px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-2" id="subtab-mytickets" onclick="setBuyerSubTab('mytickets')">
+<i class="ph-bold ph-ticket"></i> Mis Compras / Mis Entradas (QR, Devolución &amp; Transferir)
+            <span class="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+</button>
+</div>
+<!-- Timer Banner if Tickets in Reservation -->
+<div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold" id="reservation-timer-banner">
+<i class="ph-bold ph-timer animate-spin"></i>
+<span>Reserva Activa: <strong class="font-mono text-white text-sm" id="timer-display">10:00</strong> min</span>
+</div>
+</div>
+<!-- SUBTAB CONTENT 1: CARTELERA, MAPA Y CHECKOUT -->
+<div class="space-y-6" id="buyer-catalog-view">
+<!-- Search & Filter Bar -->
+<div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row items-center justify-between gap-3">
+<div class="relative w-full md:w-96">
+<i class="ph ph-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-base"></i>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs md:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500" placeholder="Buscar artista, evento, banda o sala..." type="text"/>
+</div>
+<div class="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
+<select class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none">
+<option>Todas las Categorías</option>
+<option>Recitales &amp; Rock</option>
+<option>Festivales</option>
+<option>Teatro</option>
+</select>
+<select class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none">
+<option>Cualquier Fecha</option>
+<option>Este Fin de Semana</option>
+<option>Mayo 2025</option>
+</select>
+<button class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold">
+              Filtrar
+            </button>
+</div>
+</div>
+<!-- Featured Event Details Header -->
+<div class="bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border border-indigo-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+<div class="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-teal-500/20 text-teal-300 border border-teal-500/30">Preventa Exclusiva</span>
+<span class="text-xs text-slate-400">Estadio Luna Central</span>
+</div>
+<h2 class="text-2xl md:text-3xl font-black text-white tracking-tight">Cosquín Rock 2025 - Gira Nacional</h2>
+<p class="text-sm text-slate-300 mt-1 flex items-center gap-4">
+<span><i class="ph-bold ph-calendar text-indigo-400"></i> Sábado 18 de Mayo, 2025 - 21:00 hs</span>
+<span><i class="ph-bold ph-map-pin text-rose-400"></i> Av. Madero 420, CABA</span>
+</p>
+</div>
+<div class="text-right">
+<span class="text-xs text-slate-400 block">Entradas desde</span>
+<span class="text-2xl font-black text-emerald-400">$ 28.000</span>
+<span class="text-[11px] text-slate-400 block">Máximo 6 entradas por persona</span>
+</div>
+</div>
+</div>
+<!-- Interactive Map & Cart Summary (2 Columns) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Left: Buyer Interactive SVG Seat Picker -->
+<div class="lg:col-span-8 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col">
+<div class="flex items-center justify-between pb-3 border-b border-slate-800">
+<div>
+<h3 class="font-bold text-white text-sm flex items-center gap-2">
+<i class="ph-bold ph-hand-pointing text-indigo-400"></i> Selecciona tus Ubicaciones en el Mapa
+                </h3>
+<p class="text-xs text-slate-400">Haz clic en las butacas o sectores para agregar al carrito (Máx. 6 entradas)</p>
+</div>
+<div class="flex items-center gap-3 text-xs">
+<div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-slate-700"></span> Ocupado</div>
+<div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-indigo-500"></span> Libre</div>
+<div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-teal-400 shadow-sm shadow-teal-400"></span> Tu Selección</div>
+</div>
+</div>
+<!-- Buyer SVG Interactive Map -->
+<div class="mt-4 bg-slate-950 rounded-xl border border-slate-800 p-4 relative overflow-hidden min-h-[460px] flex items-center justify-center">
+<svg class="w-full h-full max-h-[490px] select-none" viewbox="0 0 800 520">
+<!-- Escenario -->
+<rect fill="#312e81" height="70" rx="8" stroke="#818cf8" stroke-width="2" width="360" x="220" y="20"></rect>
+<path d="M 220 90 L 300 115 L 500 115 L 580 90 Z" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.5"></path>
+<text fill="#ffffff" font-size="14" font-weight="bold" letter-spacing="2" text-anchor="middle" x="400" y="58">ESCENARIO</text>
+<!-- Platea Preferencial VIP (Interactive individual seats) -->
+<g>
+<rect fill="#0f172a" height="110" rx="8" stroke="#6366f1" stroke-dasharray="4,2" stroke-width="1.5" width="340" x="230" y="135"></rect>
+<text fill="#a5b4fc" font-size="11" font-weight="bold" text-anchor="middle" x="400" y="155">PLATEA VIP ($45.000)</text>
+<!-- Seat grid interactive -->
+<!-- Row A -->
+<g id="buyer-seats-row-a">
+<circle class="cursor-pointer transition hover:scale-125" cx="270" cy="180" fill="#4f46e5" id="seat-A1" onclick="toggleSeat('Platea VIP', 'A', 1, 45000, 'seat-A1')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="270" y="183">A1</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="300" cy="180" fill="#4f46e5" id="seat-A2" onclick="toggleSeat('Platea VIP', 'A', 2, 45000, 'seat-A2')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="300" y="183">A2</text>
+<circle class="cursor-not-allowed" cx="330" cy="180" fill="#334155" id="seat-A3" r="9"></circle> <!-- occupied -->
+<text class="pointer-events-none" fill="#64748b" font-size="8" text-anchor="middle" x="330" y="183">X</text>
+<circle class="cursor-not-allowed" cx="360" cy="180" fill="#334155" id="seat-A4" r="9"></circle> <!-- occupied -->
+<text class="pointer-events-none" fill="#64748b" font-size="8" text-anchor="middle" x="360" y="183">X</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="390" cy="180" fill="#4f46e5" id="seat-A5" onclick="toggleSeat('Platea VIP', 'A', 5, 45000, 'seat-A5')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="390" y="183">A5</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="420" cy="180" fill="#4f46e5" id="seat-A6" onclick="toggleSeat('Platea VIP', 'A', 6, 45000, 'seat-A6')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="420" y="183">A6</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="450" cy="180" fill="#4f46e5" id="seat-A7" onclick="toggleSeat('Platea VIP', 'A', 7, 45000, 'seat-A7')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="450" y="183">A7</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="480" cy="180" fill="#4f46e5" id="seat-A8" onclick="toggleSeat('Platea VIP', 'A', 8, 45000, 'seat-A8')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="480" y="183">A8</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="510" cy="180" fill="#4f46e5" id="seat-A9" onclick="toggleSeat('Platea VIP', 'A', 9, 45000, 'seat-A9')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="510" y="183">A9</text>
+</g>
+<!-- Row B -->
+<g id="buyer-seats-row-b">
+<circle class="cursor-pointer transition hover:scale-125" cx="270" cy="215" fill="#4f46e5" id="seat-B1" onclick="toggleSeat('Platea VIP', 'B', 1, 45000, 'seat-B1')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="270" y="218">B1</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="300" cy="215" fill="#4f46e5" id="seat-B2" onclick="toggleSeat('Platea VIP', 'B', 2, 45000, 'seat-B2')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="300" y="218">B2</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="330" cy="215" fill="#4f46e5" id="seat-B3" onclick="toggleSeat('Platea VIP', 'B', 3, 45000, 'seat-B3')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="330" y="218">B3</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="360" cy="215" fill="#4f46e5" id="seat-B4" onclick="toggleSeat('Platea VIP', 'B', 4, 45000, 'seat-B4')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="360" y="218">B4</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="390" cy="215" fill="#4f46e5" id="seat-B5" onclick="toggleSeat('Platea VIP', 'B', 5, 45000, 'seat-B5')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="390" y="218">B5</text>
+<circle class="cursor-not-allowed" cx="420" cy="215" fill="#334155" id="seat-B6" r="9"></circle>
+<text class="pointer-events-none" fill="#64748b" font-size="8" text-anchor="middle" x="420" y="218">X</text>
+<circle class="cursor-not-allowed" cx="450" cy="215" fill="#334155" id="seat-B7" r="9"></circle>
+<text class="pointer-events-none" fill="#64748b" font-size="8" text-anchor="middle" x="450" y="218">X</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="480" cy="215" fill="#4f46e5" id="seat-B8" onclick="toggleSeat('Platea VIP', 'B', 8, 45000, 'seat-B8')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="480" y="218">B8</text>
+<circle class="cursor-pointer transition hover:scale-125" cx="510" cy="215" fill="#4f46e5" id="seat-B9" onclick="toggleSeat('Platea VIP', 'B', 9, 45000, 'seat-B9')" r="9"></circle>
+<text class="pointer-events-none" fill="#fff" font-size="8" text-anchor="middle" x="510" y="218">B9</text>
+</g>
+</g>
+<!-- Campo General (Clickeable Sector Button) -->
+<g class="cursor-pointer transition hover:opacity-90" onclick="addGeneralTicket('Campo General', 28000)">
+<rect fill="#042f2e" height="100" rx="8" stroke="#14b8a6" stroke-width="2" width="440" x="180" y="260"></rect>
+<text fill="#2dd4bf" font-size="13" font-weight="bold" text-anchor="middle" x="400" y="300">CAMPO GENERAL DE PIE ($28.000)</text>
+<text fill="#99f6e4" font-size="11" text-anchor="middle" x="400" y="320">Toca aquí para sumar entrada de Campo (Sin numerar)</text>
+<rect fill="#0d9488" height="22" rx="4" width="120" x="340" y="332"></rect>
+<text fill="#ffffff" font-size="10" font-weight="bold" text-anchor="middle" x="400" y="347">+ Agregar Campo</text>
+</g>
+<!-- Pullman Alto (Clickeable Sector) -->
+<g class="cursor-pointer transition hover:opacity-90" onclick="addGeneralTicket('Pullman Alto Grada', 34000)">
+<path d="M 120 380 L 680 380 L 640 480 L 160 480 Z" fill="#1e293b" stroke="#f59e0b" stroke-width="2"></path>
+<text fill="#fbbf24" font-size="12" font-weight="bold" text-anchor="middle" x="400" y="420">PULLMAN ALTO ($34.000)</text>
+<text fill="#fde68a" font-size="10" text-anchor="middle" x="400" y="440">Ubicación numerada por grada asignada automáticamente</text>
+<rect fill="#d97706" height="20" rx="4" width="120" x="340" y="450"></rect>
+<text fill="#ffffff" font-size="10" font-weight="bold" text-anchor="middle" x="400" y="464">+ Agregar Pullman</text>
+</g>
+</svg>
+</div>
+</div>
+<!-- Right: Checkout Step with Upselling (Estacionamiento & Consumiciones) -->
+<div class="lg:col-span-4 space-y-4">
+<!-- Resumen de Entradas Seleccionadas -->
+<div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+<div class="flex items-center justify-between pb-2 border-b border-slate-800">
+<h4 class="font-bold text-white text-sm flex items-center gap-2">
+<i class="ph-bold ph-shopping-cart text-indigo-400"></i> Tu Selección
+                </h4>
+<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" id="seat-count-badge">0 / 6 Entradas</span>
+</div>
+<!-- Lista de Entradas -->
+<div class="space-y-2 max-h-48 overflow-y-auto pr-1" id="selected-tickets-list">
+<div class="text-xs text-slate-400 text-center py-4 italic">
+                  No has seleccionado ninguna entrada aún.<br/>Haz clic en las butacas o sectores.
+                </div>
+</div>
+<!-- Subtotal Entradas -->
+<div class="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
+<span class="text-slate-400">Subtotal Entradas:</span>
+<span class="font-bold text-white text-sm" id="subtotal-tickets">$ 0</span>
+</div>
+</div>
+<!-- ADICIONALES (UPSELLING) ANTES DE PAGAR -->
+<div class="bg-slate-900/80 border border-indigo-500/30 rounded-2xl p-5 shadow-xl space-y-4">
+<div class="flex items-center gap-2 pb-2 border-b border-slate-800">
+<span class="p-1 rounded bg-amber-500/20 text-amber-400"><i class="ph-bold ph-plus-circle text-base"></i></span>
+<div>
+<h4 class="font-bold text-white text-xs">Adicionales Anticipados (Upselling)</h4>
+<p class="text-[11px] text-slate-400">Ahorra tiempo y asegura tu lugar antes del evento</p>
+</div>
+</div>
+<!-- A) Estacionamiento Anticipado -->
+<div class="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2.5">
+<div class="flex items-center justify-between">
+<label class="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-200">
+<input class="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0" id="add-parking-check" onchange="toggleParkingUpsell()" type="checkbox"/>
+<span class="flex items-center gap-1.5"><i class="ph-bold ph-car text-teal-400"></i> Pase Estacionamiento</span>
+</label>
+<span class="text-xs font-bold text-teal-400">+$ 8.500</span>
+</div>
+<div class="space-y-2 pt-2 border-t border-slate-800/60 hidden" id="parking-details-box">
+<div>
+<label class="block text-[11px] text-slate-400 mb-1">Playa Asignada:</label>
+<select class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white" id="parking-lot-select">
+<option>Playa Norte (Subsuelo A) - 45 cupos disp.</option>
+<option>Playa Este (Descubierta) - 18 cupos disp.</option>
+</select>
+</div>
+<div>
+<label class="block text-[11px] text-slate-400 mb-1">Patente del Vehículo (Obligatoria):</label>
+<input class="w-full uppercase font-mono bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-teal-300 placeholder-slate-600" id="parking-plate" placeholder="Ej: AF 123 CD" type="text"/>
+</div>
+</div>
+</div>
+<!-- B) Consumiciones Gastronómicas Anticipadas -->
+<div class="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2.5">
+<div class="flex items-center justify-between">
+<span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+<i class="ph-bold ph-fork-knife text-amber-400"></i> Consumiciones en Preventa
+                  </span>
+<span class="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded">15% OFF barra</span>
+</div>
+<div class="space-y-2 text-xs">
+<div class="flex items-center justify-between bg-slate-900/60 p-2 rounded-lg">
+<div>
+<div class="font-medium text-white text-[11px]">Doble Burger + Cerveza</div>
+<div class="text-[10px] text-slate-400">$ 9.500</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-6 h-6 rounded bg-slate-800 text-slate-300 font-bold hover:bg-slate-700" onclick="changeFoodQty(-1)">-</button>
+<span class="w-4 text-center font-bold text-white" id="food-qty">0</span>
+<button class="w-6 h-6 rounded bg-slate-800 text-slate-300 font-bold hover:bg-slate-700" onclick="changeFoodQty(1)">+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- TOTAL FINAL & BOTÓN DE PAGO -->
+<div class="pt-3 border-t border-slate-800 space-y-3">
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold text-slate-300">TOTAL A PAGAR:</span>
+<span class="text-xl font-black text-emerald-400" id="grand-total">$ 0</span>
+</div>
+<button class="w-full py-3 rounded-xl bg-slate-800 text-slate-500 font-bold text-sm transition flex items-center justify-center gap-2 cursor-not-allowed" disabled="" id="btn-pay" onclick="processCheckoutPayment()">
+<i class="ph-bold ph-credit-card"></i> Pagar con Pasarela Externa
+                </button>
+<p class="text-[10px] text-center text-slate-500">Transacción segura procesada por Pasarela Bancaria Externa.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- SUBTAB CONTENT 2: MIS COMPRAS & MIS ENTRADAS (QR, TRANSFERENCIA & REEMBOLSO) -->
+<div class="space-y-6 hidden" id="buyer-mytickets-view">
+<div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+<div>
+<h3 class="text-xl font-bold text-white flex items-center gap-2">
+<i class="ph-bold ph-ticket text-indigo-400"></i> Historial de Compras y Vouchers Activos
+              </h3>
+<p class="text-xs text-slate-400 mt-0.5">Tus códigos QR son únicos e intransferibles en simultáneo. Al transferir se anulará tu código actual.</p>
+</div>
+<span class="text-xs text-teal-400 font-semibold px-3 py-1 rounded-full bg-teal-500/10 border border-teal-500/30">
+              Usuario: martin.gomez@email.com (DNI: 35.890.123)
+            </span>
+</div>
+<!-- Active Ticket Card Item -->
+<div class="mt-6 bg-slate-950 rounded-2xl border border-slate-800 p-6 space-y-6">
+<!-- Order Header -->
+<div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+<div>
+<span class="text-xs font-mono text-indigo-400 font-bold">ORDEN #TKT-98214</span>
+<h4 class="text-lg font-bold text-white">Cosquín Rock 2025 - Función 18 de Mayo</h4>
+<div class="text-xs text-slate-400">Comprado el 10/05/2025 • Reembolsos habilitados hasta el 16/05 21:00 hs (48h antes)</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition" onclick="openRefundModal()">
+<i class="ph-bold ph-arrow-u-up-left"></i> Solicitar Reembolso (Devolución)
+                </button>
+</div>
+</div>
+<!-- Independent QRs: 1. Entrada | 2. Estacionamiento | 3. Consumición -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- QR 1: ENTRADA -->
+<div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex flex-col items-center text-center space-y-3 relative overflow-hidden" id="ticket-qr-card">
+<div class="flex items-center justify-between w-full">
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">ENTRADA AL SHOW</span>
+<span class="text-[10px] font-bold text-emerald-400 flex items-center gap-1" id="ticket-status-pill"><i class="ph-fill ph-check-circle"></i> Válida</span>
+</div>
+<!-- QR Graphic Mockup -->
+<div class="p-3 bg-white rounded-xl shadow-lg relative">
+<img alt="QR Entrada" class="w-32 h-32" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+</div>
+<div class="text-xs">
+<div class="font-bold text-white">Platea Preferencial - Fila A Butaca 1</div>
+<div class="text-[11px] text-slate-400 mt-0.5">Titular: Martín Gómez</div>
+<div class="font-mono text-[10px] text-slate-500 mt-1">HASH: 98a3-21ef-44cd</div>
+</div>
+<!-- Transfer Button -->
+<button class="w-full py-2 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold flex items-center justify-center gap-1.5 transition" onclick="openTransferModal()">
+<i class="ph-bold ph-paper-plane-tilt"></i> Transferir Entrada
+                </button>
+</div>
+<!-- QR 2: PASE ESTACIONAMIENTO -->
+<div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex flex-col items-center text-center space-y-3">
+<div class="flex items-center justify-between w-full">
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">ESTACIONAMIENTO</span>
+<span class="text-[10px] font-bold text-emerald-400 flex items-center gap-1"><i class="ph-fill ph-check-circle"></i> Habilitado</span>
+</div>
+<div class="p-3 bg-white rounded-xl shadow-lg">
+<img alt="QR Estacionamiento" class="w-32 h-32" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+</div>
+<div class="text-xs">
+<div class="font-bold text-white">Playa Norte (Subsuelo A)</div>
+<div class="text-xs font-mono font-bold text-teal-400 mt-0.5 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 inline-block">PATENTE: AF 123 CD</div>
+<div class="text-[10px] text-slate-400 mt-1">Escanear en barrera de acceso vehicular</div>
+</div>
+</div>
+<!-- QR 3: VOUCHER CONSUMICIÓN -->
+<div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex flex-col items-center text-center space-y-3">
+<div class="flex items-center justify-between w-full">
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">CONSUMICIÓN BARRA</span>
+<span class="text-[10px] font-bold text-amber-400 flex items-center gap-1" id="voucher-status-badge"><i class="ph-bold ph-clock"></i> Pendiente Canje</span>
+</div>
+<div class="p-3 bg-white rounded-xl shadow-lg">
+<img alt="QR Voucher" class="w-32 h-32" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+</div>
+<div class="text-xs">
+<div class="font-bold text-white">1x Hamburguesa Doble + Cerveza</div>
+<div class="text-[11px] text-slate-400 mt-0.5">Canjeable en cualquier barra del predio</div>
+<div class="font-mono text-[10px] text-slate-500 mt-1">VOUCHER #VCH-391</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- ============================================================== -->
+<!-- 4. VISTA CONTROLADOR DE ACCESO (SCANNER QR MOBILE/TABLET)       -->
+<!-- ============================================================== -->
+<section class="space-y-6 hidden" id="view-controller">
+<!-- Section Header -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+<div>
+<div class="flex items-center gap-2">
+<span class="px-2.5 py-0.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-teal-400 text-xs font-semibold uppercase">Punto de Control Operativo</span>
+<h1 class="text-2xl font-bold tracking-tight text-white">App de Validación y Escaneo QR</h1>
+</div>
+<p class="text-sm text-slate-400 mt-1">Lector de alta velocidad para molinetes de ingreso, barrera de estacionamiento y entrega de consumiciones en barra.</p>
+</div>
+<div class="flex items-center gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
+<span class="text-xs text-slate-400 px-2 font-medium">Operador: Juan Pérez (#OP-14)</span>
+</div>
+</div>
+<!-- Point of Access Switcher -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<button class="p-4 rounded-2xl bg-indigo-600/30 border-2 border-indigo-500 text-left transition flex items-center gap-3" id="chk-door" onclick="setAccessCheckpoint('door')">
+<div class="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-2xl">
+<i class="ph-bold ph-door"></i>
+</div>
+<div>
+<div class="font-bold text-white text-sm">1. Puerta de Sala</div>
+<div class="text-xs text-indigo-300">Validar Entrada al Show</div>
+</div>
+</button>
+<button class="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left hover:border-slate-700 transition flex items-center gap-3" id="chk-parking" onclick="setAccessCheckpoint('parking')">
+<div class="w-12 h-12 rounded-xl bg-slate-800 text-teal-400 flex items-center justify-center text-2xl">
+<i class="ph-bold ph-car"></i>
+</div>
+<div>
+<div class="font-bold text-white text-sm">2. Ingreso Estacionamiento</div>
+<div class="text-xs text-slate-400">Verificar Patente y Pase</div>
+</div>
+</button>
+<button class="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left hover:border-slate-700 transition flex items-center gap-3" id="chk-bar" onclick="setAccessCheckpoint('bar')">
+<div class="w-12 h-12 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center text-2xl">
+<i class="ph-bold ph-beer-bottle"></i>
+</div>
+<div>
+<div class="font-bold text-white text-sm">3. Barra Gastronómica</div>
+<div class="text-xs text-slate-400">Canjear Vouchers de Bebida/Comida</div>
+</div>
+</button>
+</div>
+<!-- Mobile/Tablet Scanner Simulation Box -->
+<div class="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
+<!-- Live Camera Simulation Viewport -->
+<div class="relative bg-slate-950 rounded-2xl border border-slate-800 h-72 overflow-hidden flex flex-col items-center justify-center">
+<!-- Scanner Target Box -->
+<div class="w-48 h-48 border-2 border-indigo-400/80 rounded-2xl relative flex items-center justify-center">
+<div class="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-teal-400"></div>
+<div class="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-teal-400"></div>
+<div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-teal-400"></div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-teal-400"></div>
+<!-- Animated Laser Line -->
+<div class="absolute w-full h-0.5 bg-gradient-to-r from-transparent via-rose-500 to-transparent scanner-laser"></div>
+<i class="ph-thin ph-qr-code text-7xl text-slate-800"></i>
+</div>
+<div class="absolute bottom-3 text-[11px] text-slate-400 bg-slate-900/80 px-3 py-1 rounded-full">
+            Apunta la cámara del dispositivo al código QR
+          </div>
+</div>
+<!-- Simulator QR Test Triggers -->
+<div class="space-y-3">
+<span class="text-xs font-semibold text-slate-300 block text-center">Simular lectura de QR en vivo:</span>
+<div class="grid grid-cols-3 gap-2">
+<button class="py-2.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex flex-col items-center gap-1 shadow-md shadow-emerald-600/20" onclick="simulateScanResult('valid')">
+<i class="ph-bold ph-check text-base"></i> QR Válido (Aprobado)
+            </button>
+<button class="py-2.5 px-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex flex-col items-center gap-1 shadow-md shadow-amber-600/20" onclick="simulateScanResult('used')">
+<i class="ph-bold ph-warning text-base"></i> Ya Usado / Canjeado
+            </button>
+<button class="py-2.5 px-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex flex-col items-center gap-1 shadow-md shadow-rose-600/20" onclick="simulateScanResult('invalid')">
+<i class="ph-bold ph-x text-base"></i> Anulado / Inexistente
+            </button>
+</div>
+</div>
+<!-- Scan Result Feedback Box -->
+<div class="p-5 rounded-2xl border transition-all duration-300 bg-slate-950 border-slate-800 text-center" id="scan-feedback-box">
+<div class="w-12 h-12 rounded-full mx-auto flex items-center justify-center text-2xl mb-2 bg-slate-800 text-slate-400" id="scan-icon-wrapper">
+<i class="ph-bold ph-scan"></i>
+</div>
+<h4 class="font-bold text-base text-slate-200" id="scan-feedback-title">Esperando escaneo</h4>
+<p class="text-xs text-slate-400 mt-1" id="scan-feedback-detail">Selecciona uno de los botones de simulación arriba para validar el flujo.</p>
+<div class="mt-3 inline-block" id="scan-meta-badge"></div>
+</div>
+</div>
+</section>
+</main>
+<!-- ================= MODAL: TRANSFERIR ENTRADA ================= -->
+<div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-4" id="modal-transfer">
+<div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-scale-up">
+<div class="flex items-center justify-between pb-3 border-b border-slate-800">
+<h3 class="font-bold text-white text-base flex items-center gap-2">
+<i class="ph-bold ph-paper-plane-tilt text-indigo-400"></i> Transferir Entrada
+        </h3>
+<button class="text-slate-400 hover:text-white" onclick="closeTransferModal()"><i class="ph-bold ph-x text-lg"></i></button>
+</div>
+<div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs space-y-1">
+<div class="font-bold flex items-center gap-1.5"><i class="ph-bold ph-warning"></i> ¡Atención con la anulación del QR!</div>
+<p>Al confirmar la transferencia, tu código QR actual se **anulará inmediatamente** y se emitirá un **nuevo código QR único** a nombre del nuevo titular.</p>
+</div>
+<div class="space-y-3">
+<div>
+<label class="block text-xs text-slate-400 mb-1">Nombre y Apellido del Destinatario</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" id="transfer-name" placeholder="Ej: Lucía Benítez" type="text"/>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">DNI del Destinatario</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" id="transfer-dni" placeholder="Ej: 38.450.999" type="text"/>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">Email del Destinatario</label>
+<input class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" id="transfer-email" placeholder="lucia@email.com" type="email"/>
+</div>
+</div>
+<div class="flex items-center justify-end gap-3 pt-2">
+<button class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-800" onclick="closeTransferModal()">Cancelar</button>
+<button class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30" onclick="executeTransferTicket()">
+          Confirmar y Emitir Nuevo QR
+        </button>
+</div>
+</div>
+</div>
+<!-- ================= MODAL: SOLICITAR REEMBOLSO ================= -->
+<div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-4" id="modal-refund">
+<div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-scale-up">
+<div class="flex items-center justify-between pb-3 border-b border-slate-800">
+<h3 class="font-bold text-white text-base flex items-center gap-2">
+<i class="ph-bold ph-arrow-u-up-left text-rose-400"></i> Solicitar Reembolso (Devolución)
+        </h3>
+<button class="text-slate-400 hover:text-white" onclick="closeRefundModal()"><i class="ph-bold ph-x text-lg"></i></button>
+</div>
+<div class="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+<div class="text-xs font-semibold text-slate-300">Desglose del Reintegro:</div>
+<div class="flex items-center justify-between text-xs text-slate-400">
+<span>1x Platea Preferencial (A1):</span>
+<span class="text-white">$ 45.000</span>
+</div>
+<div class="flex items-center justify-between text-xs text-slate-400">
+<span>1x Pase Estacionamiento:</span>
+<span class="text-white">$ 8.500</span>
+</div>
+<div class="flex items-center justify-between text-xs text-slate-400">
+<span>1x Voucher Gastronómico:</span>
+<span class="text-white">$ 9.500</span>
+</div>
+<div class="pt-2 border-t border-slate-800 flex items-center justify-between text-xs font-bold">
+<span class="text-slate-200">Monto Total a Reintegrar:</span>
+<span class="text-emerald-400 font-mono text-sm">$ 63.000</span>
+</div>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">Motivo de la Devolución</label>
+<select class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+<option>Imposibilidad de asistencia por fuerza mayor</option>
+<option>Error en la selección de fecha</option>
+<option>Otro motivo personal</option>
+</select>
+</div>
+<div class="text-[11px] text-slate-400">
+        Política: Se acreditará a través de la pasarela de pagos al mismo medio utilizado en un plazo de 72hs hábiles.
+      </div>
+<div class="flex items-center justify-end gap-3 pt-2">
+<button class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-800" onclick="closeRefundModal()">Cerrar</button>
+<button class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shadow-lg shadow-rose-600/30" onclick="executeRefundTicket()">
+          Confirmar Devolución
+        </button>
+</div>
+</div>
+</div>
+<!-- ================= JAVASCRIPT LOGIC ================= -->
+<script>
+    // Global Application State
+    let currentRole = 'buyer';
+    let buyerSubTab = 'catalog';
+    let activeCheckpoint = 'door';
+    let isFunctionPublished = true;
+    let isSectorNumerated = true;
+    
+    // Reservation Cart State
+    let selectedTickets = []; // { sector, row, seat, price, id }
+    let hasParking = false;
+    let foodQty = 0;
+    const PARKING_PRICE = 8500;
+    const FOOD_PRICE = 9500;
+    let timerSeconds = 600; // 10 minutes
+    let timerInterval = null;
+
+    // Toast helper
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toast-msg');
+      const toastIcon = document.getElementById('toast-icon');
+      
+      toastMsg.innerText = message;
+      if (type === 'error') {
+        toastIcon.innerHTML = '<i class="ph-bold ph-x-circle text-rose-400"></i>';
+      } else if (type === 'info') {
+        toastIcon.innerHTML = '<i class="ph-bold ph-info text-indigo-400"></i>';
+      } else {
+        toastIcon.innerHTML = '<i class="ph-bold ph-check-circle text-teal-400"></i>';
+      }
+
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+        toast.classList.remove('translate-y-0', 'opacity-100');
+      }, 3500);
+    }
+
+    // Role Switcher
+    function switchRole(role) {
+      currentRole = role;
+      
+      // Hide all role views
+      document.getElementById('view-admin').classList.add('hidden');
+      document.getElementById('view-organizer').classList.add('hidden');
+      document.getElementById('view-buyer').classList.add('hidden');
+      document.getElementById('view-controller').classList.add('hidden');
+
+      // Reset tab button styles
+      const tabs = ['admin', 'organizer', 'buyer', 'controller'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-${t}`);
+        btn.className = 'role-btn px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-1.5 text-slate-400 hover:text-white';
+      });
+
+      // Show active view and style active tab
+      const activeBtn = document.getElementById(`tab-${role}`);
+      activeBtn.className = 'role-btn px-3.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition-all flex items-center gap-1.5 bg-indigo-600 text-white shadow-md shadow-indigo-600/30';
+      
+      document.getElementById(`view-${role}`).classList.remove('hidden');
+
+      // Update badge
+      const roleNames = {
+        admin: '1. Administrador (Backoffice)',
+        organizer: '2. Organizador (Backoffice)',
+        buyer: '3. Comprador (Portal de Venta)',
+        controller: '4. Controlador de Acceso'
+      };
+      document.getElementById('role-badge-text').innerText = `Vista Activa: ${roleNames[role]}`;
+      showToast(`Cambiado a vista de ${roleNames[role]}`, 'info');
+    }
+
+    // Buyer Sub-tabs
+    function setBuyerSubTab(tab) {
+      buyerSubTab = tab;
+      const catalogView = document.getElementById('buyer-catalog-view');
+      const myTicketsView = document.getElementById('buyer-mytickets-view');
+      const tabCat = document.getElementById('subtab-catalog');
+      const tabTkt = document.getElementById('subtab-mytickets');
+
+      if (tab === 'catalog') {
+        catalogView.classList.remove('hidden');
+        myTicketsView.classList.add('hidden');
+        tabCat.className = 'px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-indigo-600 text-white flex items-center gap-2';
+        tabTkt.className = 'px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-2';
+      } else {
+        catalogView.classList.add('hidden');
+        myTicketsView.classList.remove('hidden');
+        tabTkt.className = 'px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-indigo-600 text-white flex items-center gap-2';
+        tabCat.className = 'px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-2';
+      }
+    }
+
+    // Reservation Timer
+    function startTimer() {
+      if (timerInterval) return;
+      document.getElementById('reservation-timer-banner').classList.remove('hidden');
+      timerInterval = setInterval(() => {
+        timerSeconds--;
+        if (timerSeconds <= 0) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+          selectedTickets = [];
+          renderSelectedTickets();
+          showToast('El tiempo de reserva de 10:00 min ha expirado. Butacas liberadas.', 'error');
+          document.getElementById('reservation-timer-banner').classList.add('hidden');
+          return;
+        }
+        const m = Math.floor(timerSeconds / 60);
+        const s = timerSeconds % 60;
+        document.getElementById('timer-display').innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+      }, 1000);
+    }
+
+    // Toggle Individual Seat Selection (Platea)
+    function toggleSeat(sector, row, seat, price, elementId) {
+      const el = document.getElementById(elementId);
+      const existingIdx = selectedTickets.findIndex(t => t.id === elementId);
+
+      if (existingIdx >= 0) {
+        // Deselect
+        selectedTickets.splice(existingIdx, 1);
+        el.setAttribute('fill', '#4f46e5');
+        el.classList.remove('seat-selected');
+      } else {
+        // Validation: Max 6 tickets rule
+        if (selectedTickets.length >= 6) {
+          showToast('Límite alcanzado: Máximo 6 entradas por persona según normativa.', 'error');
+          return;
+        }
+        selectedTickets.push({ sector, row, seat, price, id: elementId });
+        el.setAttribute('fill', '#2dd4bf'); // teal
+        el.classList.add('seat-selected');
+        startTimer();
+      }
+
+      renderSelectedTickets();
+    }
+
+    // Add General / Pullman Ticket
+    function addGeneralTicket(sectorName, price) {
+      if (selectedTickets.length >= 6) {
+        showToast('Límite alcanzado: Máximo 6 entradas por función.', 'error');
+        return;
+      }
+      const pseudoId = 'gen-' + Date.now();
+      selectedTickets.push({
+        sector: sectorName,
+        row: 'General',
+        seat: selectedTickets.filter(t => t.sector === sectorName).length + 1,
+        price: price,
+        id: pseudoId
+      });
+      startTimer();
+      renderSelectedTickets();
+      showToast(`1 Entrada agregada para ${sectorName}`);
+    }
+
+    // Remove Ticket from cart
+    function removeTicket(idx) {
+      const t = selectedTickets[idx];
+      if (t.id && document.getElementById(t.id)) {
+        const el = document.getElementById(t.id);
+        el.setAttribute('fill', '#4f46e5');
+        el.classList.remove('seat-selected');
+      }
+      selectedTickets.splice(idx, 1);
+      renderSelectedTickets();
+      if (selectedTickets.length === 0 && timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        timerSeconds = 600;
+        document.getElementById('reservation-timer-banner').classList.add('hidden');
+      }
+    }
+
+    // Render Cart & Calculate Grand Total
+    function renderSelectedTickets() {
+      const container = document.getElementById('selected-tickets-list');
+      const badge = document.getElementById('seat-count-badge');
+      const subtotalEl = document.getElementById('subtotal-tickets');
+      const grandTotalEl = document.getElementById('grand-total');
+      const payBtn = document.getElementById('btn-pay');
+
+      badge.innerText = `${selectedTickets.length} / 6 Entradas`;
+
+      if (selectedTickets.length === 0) {
+        container.innerHTML = `
+          <div class="text-xs text-slate-400 text-center py-4 italic">
+            No has seleccionado ninguna entrada aún.<br>Haz clic en las butacas o sectores.
+          </div>
+        `;
+        subtotalEl.innerText = '$ 0';
+        updateGrandTotal();
+        payBtn.disabled = true;
+        payBtn.className = 'w-full py-3 rounded-xl bg-slate-800 text-slate-500 font-bold text-sm transition flex items-center justify-center gap-2 cursor-not-allowed';
+        return;
+      }
+
+      let subtotal = 0;
+      let html = '';
+      selectedTickets.forEach((t, i) => {
+        subtotal += t.price;
+        html += `
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+            <div>
+              <div class="font-semibold text-slate-200">${t.sector}</div>
+              <div class="text-[11px] text-slate-400">${t.row !== 'General' ? 'Fila ' + t.row + ' • Butaca ' + t.seat : 'Cupo General #' + t.seat}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-teal-400">$ ${t.price.toLocaleString()}</span>
+              <button onclick="removeTicket(${i})" class="text-slate-500 hover:text-rose-400 transition"><i class="ph-bold ph-trash"></i></button>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+      subtotalEl.innerText = `$ ${subtotal.toLocaleString()}`;
+      updateGrandTotal();
+
+      payBtn.disabled = false;
+      payBtn.className = 'w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30';
+    }
+
+    // Toggle Parking Upsell
+    function toggleParkingUpsell() {
+      const check = document.getElementById('add-parking-check');
+      const box = document.getElementById('parking-details-box');
+      hasParking = check.checked;
+      if (hasParking) {
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+      updateGrandTotal();
+    }
+
+    // Food Quantity
+    function changeFoodQty(delta) {
+      foodQty = Math.max(0, foodQty + delta);
+      document.getElementById('food-qty').innerText = foodQty;
+      updateGrandTotal();
+    }
+
+    function updateGrandTotal() {
+      let ticketsTotal = selectedTickets.reduce((acc, t) => acc + t.price, 0);
+      let parkingTotal = hasParking ? PARKING_PRICE : 0;
+      let foodTotal = foodQty * FOOD_PRICE;
+      let grand = ticketsTotal + parkingTotal + foodTotal;
+      document.getElementById('grand-total').innerText = `$ ${grand.toLocaleString()}`;
+    }
+
+    // Process Payment
+    function processCheckoutPayment() {
+      if (hasParking) {
+        const plate = document.getElementById('parking-plate').value.trim();
+        if (!plate) {
+          showToast('Por favor ingresa la patente de tu vehículo para el pase de estacionamiento.', 'error');
+          return;
+        }
+      }
+
+      showToast('Conectando con Pasarela Bancaria... Pago aprobado.', 'success');
+      setTimeout(() => {
+        showToast('¡Compra exitosa! Se han generado tus códigos QR en Mis Entradas.', 'success');
+        setBuyerSubTab('mytickets');
+      }, 1200);
+    }
+
+    // Modals: Transfer & Refund
+    function openTransferModal() {
+      document.getElementById('modal-transfer').classList.remove('hidden');
+    }
+    function closeTransferModal() {
+      document.getElementById('modal-transfer').classList.add('hidden');
+    }
+    function executeTransferTicket() {
+      const email = document.getElementById('transfer-email').value;
+      if (!email) {
+        showToast('Ingresa un email de destinatario válido.', 'error');
+        return;
+      }
+      closeTransferModal();
+      document.getElementById('ticket-status-pill').innerHTML = '<i class="ph-bold ph-prohibit text-rose-400"></i> Anulada por Transferencia';
+      document.getElementById('ticket-status-pill').className = 'text-[10px] font-bold text-rose-400 flex items-center gap-1';
+      document.getElementById('ticket-qr-card').classList.add('opacity-60');
+      showToast(`Entrada transferida a ${email}. Código QR actual anulado con éxito.`);
+    }
+
+    function openRefundModal() {
+      document.getElementById('modal-refund').classList.remove('hidden');
+    }
+    function closeRefundModal() {
+      document.getElementById('modal-refund').classList.add('hidden');
+    }
+    function executeRefundTicket() {
+      closeRefundModal();
+      showToast('Solicitud de reembolso enviada a la pasarela. Reintegro aprobado en 72hs.');
+      document.getElementById('ticket-status-pill').innerHTML = '<i class="ph-bold ph-arrow-u-up-left text-amber-400"></i> Reembolsada';
+      document.getElementById('voucher-status-badge').innerHTML = '<i class="ph-bold ph-x text-rose-400"></i> Anulado por Devolución';
+    }
+
+    // Access Controller Checkpoint Selection
+    function setAccessCheckpoint(cp) {
+      activeCheckpoint = cp;
+      const bDoor = document.getElementById('chk-door');
+      const bPark = document.getElementById('chk-parking');
+      const bBar = document.getElementById('chk-bar');
+
+      [bDoor, bPark, bBar].forEach(b => {
+        b.className = 'p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left hover:border-slate-700 transition flex items-center gap-3';
+      });
+
+      if (cp === 'door') {
+        bDoor.className = 'p-4 rounded-2xl bg-indigo-600/30 border-2 border-indigo-500 text-left transition flex items-center gap-3';
+      } else if (cp === 'parking') {
+        bPark.className = 'p-4 rounded-2xl bg-teal-600/30 border-2 border-teal-500 text-left transition flex items-center gap-3';
+      } else {
+        bBar.className = 'p-4 rounded-2xl bg-amber-600/30 border-2 border-amber-500 text-left transition flex items-center gap-3';
+      }
+
+      // Reset feedback box
+      document.getElementById('scan-feedback-title').innerText = 'Esperando escaneo';
+      document.getElementById('scan-feedback-detail').innerText = `Punto de control activo: ${cp.toUpperCase()}. Escanea un código QR correspondiente.`;
+      document.getElementById('scan-meta-badge').innerHTML = '';
+      document.getElementById('scan-icon-wrapper').className = 'w-12 h-12 rounded-full mx-auto flex items-center justify-center text-2xl mb-2 bg-slate-800 text-slate-400';
+      document.getElementById('scan-icon-wrapper').innerHTML = '<i class="ph-bold ph-scan"></i>';
+    }
+
+    // Simulate Access Controller QR Scans
+    function simulateScanResult(status) {
+      const box = document.getElementById('scan-feedback-box');
+      const title = document.getElementById('scan-feedback-title');
+      const detail = document.getElementById('scan-feedback-detail');
+      const icon = document.getElementById('scan-icon-wrapper');
+      const meta = document.getElementById('scan-meta-badge');
+
+      if (status === 'valid') {
+        box.className = 'p-5 rounded-2xl border transition-all duration-300 bg-emerald-950/40 border-emerald-500/60 text-center';
+        icon.className = 'w-12 h-12 rounded-full mx-auto flex items-center justify-center text-2xl mb-2 bg-emerald-500 text-white';
+        icon.innerHTML = '<i class="ph-bold ph-check"></i>';
+        
+        if (activeCheckpoint === 'door') {
+          title.innerText = 'ACCESO APROBADO (PUERTA)';
+          detail.innerText = 'Entrada Válida • Platea VIP Fila A Butaca 1 • Titular: Martín Gómez';
+          meta.innerHTML = '<span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Molinete Desbloqueado</span>';
+        } else if (activeCheckpoint === 'parking') {
+          title.innerText = 'PASE VEHICULAR APROBADO';
+          detail.innerText = 'Patente Verificada: [AF 123 CD] • Playa Norte Subsuelo A';
+          meta.innerHTML = '<span class="px-3 py-1 rounded-full text-xs font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">Barrera Abierta</span>';
+        } else {
+          title.innerText = 'VOUCHER CANJEADO EXITOSAMENTE';
+          detail.innerText = 'Entregar: 1x Hamburguesa Doble + 1x Cerveza';
+          meta.innerHTML = '<span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">Stock descontado de Barra</span>';
+        }
+      } else if (status === 'used') {
+        box.className = 'p-5 rounded-2xl border transition-all duration-300 bg-amber-950/40 border-amber-500/60 text-center';
+        icon.className = 'w-12 h-12 rounded-full mx-auto flex items-center justify-center text-2xl mb-2 bg-amber-500 text-white';
+        icon.innerHTML = '<i class="ph-bold ph-warning"></i>';
+        title.innerText = 'ACCESO DENEGADO: YA CANJEADO / USADO';
+        detail.innerText = 'Este código QR ya fue escaneado hoy a las 20:14 hs en Puerta Norte.';
+        meta.innerHTML = '<span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">Código Duplicado</span>';
+      } else {
+        box.className = 'p-5 rounded-2xl border transition-all duration-300 bg-rose-950/40 border-rose-500/60 text-center';
+        icon.className = 'w-12 h-12 rounded-full mx-auto flex items-center justify-center text-2xl mb-2 bg-rose-500 text-white';
+        icon.innerHTML = '<i class="ph-bold ph-x"></i>';
+        title.innerText = 'CÓDIGO ANULADO O INVÁLIDO';
+        detail.innerText = 'Este pase fue anulado por transferencia de entrada o reembolso.';
+        meta.innerHTML = '<span class="px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">Rechazar Ingreso</span>';
+      }
+    }
+
+    // Admin Canvas Inspector functions
+    function selectElementToInspect(type) {
+      const title = document.getElementById('insp-title');
+      const posX = document.getElementById('insp-posx');
+      const posY = document.getElementById('insp-posy');
+      const w = document.getElementById('insp-w');
+      const h = document.getElementById('insp-h');
+      const cap = document.getElementById('insp-cap');
+
+      if (type === 'escenario') {
+        title.innerText = 'Escenario Principal';
+        posX.value = 220; posY.value = 25; w.value = 360; h.value = 70; cap.value = 0;
+      } else if (type === 'platea') {
+        title.innerText = 'Sector Platea VIP Preferencial';
+        posX.value = 230; posY.value = 145; w.value = 340; h.value = 110; cap.value = 300;
+      } else if (type === 'campo') {
+        title.innerText = 'Sector Campo General (Sin Numerar)';
+        posX.value = 180; posY.value = 265; w.value = 440; h.value = 110; cap.value = 2500;
+      } else {
+        title.innerText = 'Sector Pullman Alto';
+        posX.value = 120; posY.value = 395; w.value = 560; h.value = 100; cap.value = 850;
+      }
+      showToast(`Propiedades de [${title.innerText}] cargadas en el inspector`);
+    }
+
+    function toggleSectorNumeration() {
+      isSectorNumerated = !isSectorNumerated;
+      const label = document.getElementById('insp-type-label');
+      const btn = document.getElementById('insp-toggle-btn');
+      const dot = document.getElementById('insp-toggle-dot');
+      const desc = document.getElementById('insp-type-desc');
+
+      if (isSectorNumerated) {
+        label.innerText = 'Numerado';
+        label.className = 'text-teal-400 font-semibold';
+        btn.className = 'w-10 h-5 bg-teal-600 rounded-full relative p-0.5 transition';
+        dot.className = 'w-4 h-4 bg-white rounded-full transition transform translate-x-5';
+        desc.innerText = 'Genera filas y butacas específicas con coordenadas exactas.';
+      } else {
+        label.innerText = 'Sin Numerar';
+        label.className = 'text-amber-400 font-semibold';
+        btn.className = 'w-10 h-5 bg-slate-700 rounded-full relative p-0.5 transition';
+        dot.className = 'w-4 h-4 bg-white rounded-full transition transform translate-x-0';
+        desc.innerText = 'Controla exclusivamente el cupo máximo por orden de llegada.';
+      }
+    }
+
+    function updateStageVisual() {
+      const x = document.getElementById('insp-posx').value;
+      const y = document.getElementById('insp-posy').value;
+      const w = document.getElementById('insp-w').value;
+      const h = document.getElementById('insp-h').value;
+      const rect = document.getElementById('svg-stage-rect');
+      if (rect) {
+        rect.setAttribute('x', x);
+        rect.setAttribute('y', y);
+        rect.setAttribute('width', w);
+        rect.setAttribute('height', h);
+      }
+    }
+
+    function saveAdminRoomSetup() {
+      showToast('Diseño geométrico de sala y capacidad de playas guardados.', 'success');
+    }
+
+    function toggleEventPublication() {
+      isFunctionPublished = !isFunctionPublished;
+      const btn = document.getElementById('btn-publish-function');
+      const text = document.getElementById('publish-status-text');
+      if (isFunctionPublished) {
+        btn.className = 'px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition flex items-center gap-2';
+        text.innerText = 'Función Publicada (Visible)';
+        showToast('La función está visible en la cartelera del portal.');
+      } else {
+        btn.className = 'px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center gap-2';
+        text.innerText = 'Función Despublicada (Borrador)';
+        showToast('Función despublicada. Oculta para los compradores.', 'info');
+      }
+    }
+  </script>
+</body>
+</html>

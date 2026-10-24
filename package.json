@@ -1,0 +1,17 @@
+{
+  "name": "ticketfr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TicketFr — Portal de venta de entradas (Caso Integrador, Ingeniería de Software).",
+  "scripts": {
+    "setup": "npm install && npm install --prefix Backend && npm install --prefix Frontend && node Backend/scripts/crear-env.mjs && npm run db:reset --prefix Backend",
+    "dev": "concurrently -k -n api,web -c magenta,cyan \"npm run dev --prefix Backend\" \"npm run dev --prefix Frontend\"",
+    "db:reset": "npm run db:reset --prefix Backend",
+    "test": "npm test --prefix Backend",
+    "build": "npm run build --prefix Frontend",
+    "typecheck": "npm run typecheck --prefix Backend && npm run typecheck --prefix Frontend"
+  },
+  "devDependencies": {
+    "concurrently": "9.1.0"
+  }
+}
