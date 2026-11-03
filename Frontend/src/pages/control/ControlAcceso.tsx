@@ -11,19 +11,48 @@ import { api, ErrorApi, mensajeError } from '../../lib/api';
 import { dni, fechaCorta, fechaHoraCorta, fechaLarga, horaSegundos, numero, porcentaje } from '../../lib/formato';
 import type { Padron, PuntoControl, RegistroValidacion, ResultadoValidacion, ResumenControl } from '../../lib/tipos';
 import { useCarga } from '../../lib/useCarga';
-import { colaPendiente, guardarPadron, padronLocal, vaciarCola, validarOffline } from './offline';
+import { colaPendiente, guardarPadron, marcarUsadoLocal, padronLocal, qrDelPadron, vaciarCola, validarOffline } from './offline';
 
 const CLAVE_FUNCION = 'ticketfr.control.funcion';
+const CLAVE_FUNCIONES = 'ticketfr.control.funciones';
 const NOMBRE_PUNTO: Record<PuntoControl, string> = { PUERTA: 'Puerta de Sala', ESTACIONAMIENTO: 'Ingreso Estacionamiento', BARRA: 'Barra Gastronómica' };
 
 type Funcion = { id: number; codigo: string; fechaHora: string; evento: string; sala: string };
+
+function leerLocal(clave: string): string | null {
+  try {
+    return localStorage.getItem(clave);
+  } catch {
+    return null;
+  }
+}
+function escribirLocal(clave: string, valor: string) {
+  try {
+    localStorage.setItem(clave, valor);
+  } catch {
+    // preferencia no persistida
+  }
+}
+
+/** Funciones operativas; sin conexión se usa la última lista conocida para seguir con el padrón local. */
+async function cargarFunciones() {
+  try {
+    const lista = await api.get<Funcion[]>('/control/funciones');
+    escribirLocal(CLAVE_FUNCIONES, JSON.stringify(lista));
+    return lista;
+  } catch (e) {
+    const guardada = leerLocal(CLAVE_FUNCIONES);
+    if (e instanceof ErrorApi && e.status === 0 && guardada) return JSON.parse(guardada) as Funcion[];
+    throw e;
+  }
+}
 
 export default function ControlAcceso() {
   const { usuario, cerrarSesion } = useAuth();
   const navegar = useNavigate();
   const toast = useToast();
-  const { datos: funciones } = useCarga(() => api.get<Funcion[]>('/control/funciones'), []);
-  const [funcionId, setFuncionId] = useState<number | null>(() => Number(localStorage.getItem(CLAVE_FUNCION)) || null);
+  const { datos: funciones, error: errorFunciones } = useCarga(cargarFunciones, []);
+  const [funcionId, setFuncionId] = useState<number | null>(() => Number(leerLocal(CLAVE_FUNCION)) || null);
   const [punto, setPunto] = useState<PuntoControl>('PUERTA');
   const [online, setOnline] = useState(true);
   const [pendientes, setPendientes] = useState(0);
@@ -35,11 +64,7 @@ export default function ControlAcceso() {
   }, [funciones, funcionId]);
   useEffect(() => {
     if (!funcionId) return;
-    try {
-      localStorage.setItem(CLAVE_FUNCION, String(funcionId));
-    } catch {
-      // preferencia no persistida
-    }
+    escribirLocal(CLAVE_FUNCION, String(funcionId));
     setPadronInfo(padronLocal(funcionId));
     setPendientes(colaPendiente(funcionId).length);
   }, [funcionId]);
@@ -111,6 +136,7 @@ export default function ControlAcceso() {
       let r: ResultadoValidacion;
       try {
         r = await api.post<ResultadoValidacion>('/control/validaciones', { codigo: valor, punto: enPunto, funcionId, confirmar });
+        if (r.confirmado) marcarUsadoLocal(funcionId, r.codigo);
       } catch (e) {
         if (!(e instanceof ErrorApi && e.status === 0)) {
           toast(mensajeError(e), 'error');
@@ -121,6 +147,8 @@ export default function ControlAcceso() {
         r = validarOffline(funcionId, valor, enPunto, confirmar);
         setPendientes(colaPendiente(funcionId).length);
       }
+      // Se confirma con lo mismo que se leyó: el código solo (sin firma) no habilita el acceso
+      r = { ...r, lectura: valor };
       setValidando(false);
       const clave = `${r.codigo}-${Date.now()}`;
       setUltimos((u) => {
@@ -142,53 +170,77 @@ export default function ControlAcceso() {
 
   // ── Cámara ──
   const [camara, setCamara] = useState(false);
-  const lector = useRef<Html5Qrcode | null>(null);
   const ultimaLectura = useRef({ texto: '', hora: 0 });
+  // El lector usa siempre la última versión de `validar`: cambiar de punto no reinicia la cámara
+  const validarRef = useRef(validar);
+  useEffect(() => {
+    validarRef.current = validar;
+  }, [validar]);
+  // Cada arranque espera a que termine de apagarse el anterior (doble montaje de StrictMode, apagar y prender rápido)
+  const parada = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     if (!camara) return;
-    const instancia = new Html5Qrcode('lector-camara');
-    lector.current = instancia;
-    instancia
-      .start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: 220 },
-        (texto) => {
-          const ahora = Date.now();
-          if (texto === ultimaLectura.current.texto && ahora - ultimaLectura.current.hora < 3000) return;
-          ultimaLectura.current = { texto, hora: ahora };
-          validar(texto);
-        },
-        () => {},
-      )
-      .catch((err) => {
-        toast(`No se pudo abrir la cámara: ${err}`, 'error');
-        setCamara(false);
-      });
+    let cancelado = false;
+    const arranque = parada.current.then(async () => {
+      if (cancelado) return null;
+      const instancia = new Html5Qrcode('lector-camara');
+      try {
+        await instancia.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: 220 },
+          (texto) => {
+            const ahora = Date.now();
+            if (texto === ultimaLectura.current.texto && ahora - ultimaLectura.current.hora < 3000) return;
+            ultimaLectura.current = { texto, hora: ahora };
+            validarRef.current(texto);
+          },
+          () => {},
+        );
+        return instancia;
+      } catch (err) {
+        if (!cancelado) {
+          toast(`No se pudo abrir la cámara: ${err}`, 'error');
+          setCamara(false);
+        }
+        return null;
+      }
+    });
     return () => {
-      instancia
-        .stop()
-        .catch(() => {})
-        .finally(() => instancia.clear());
-      lector.current = null;
+      cancelado = true;
+      parada.current = arranque.then(async (instancia) => {
+        if (!instancia) return;
+        await instancia.stop().catch(() => {});
+        try {
+          instancia.clear();
+        } catch {
+          // el contenedor ya se desmontó
+        }
+      });
     };
-  }, [camara, validar, toast]);
+  }, [camara, toast]);
 
   // ── Simulación (toma códigos reales del padrón) ──
   const simular = async (tipo: 'valido' | 'invalido' | 'canje') => {
     if (!funcionId) return;
     let padron = padronLocal(funcionId);
-    if (!padron && online) {
-      padron = await api.get<Padron>(`/control/funciones/${funcionId}/padron`);
-      guardarPadron(padron);
-      setPadronInfo(padron);
+    // Los padrones sincronizados antes de incluir firmas y lista negra se renuevan
+    if ((!padron || !padron.listaNegra) && online) {
+      try {
+        padron = await api.get<Padron>(`/control/funciones/${funcionId}/padron`);
+        guardarPadron(padron);
+        setPadronInfo(padron);
+      } catch (e) {
+        return toast(mensajeError(e), 'error');
+      }
     }
     if (!padron) return toast('Sincronizá el padrón para simular lecturas', 'error');
     const azar = <T,>(lista: T[]) => lista[Math.floor(Math.random() * lista.length)];
     if (tipo === 'valido') {
-      const item = azar(padron.codigos.filter((c) => c.tipo === 'ENTRADA' && c.estado === 'VIGENTE'));
+      const vedados = padron.listaNegra ?? [];
+      const item = azar(padron.codigos.filter((c) => c.tipo === 'ENTRADA' && c.estado === 'VIGENTE' && !(c.dni && vedados.includes(c.dni))));
       if (!item) return toast('No quedan entradas vigentes en el padrón', 'info');
       setPunto('PUERTA');
-      validar(item.codigo, false, 'PUERTA');
+      validar(qrDelPadron(item), false, 'PUERTA');
     } else if (tipo === 'invalido') {
       const candidato = azar([...padron.revocados.map((r) => r.codigo), ...padron.codigos.filter((c) => c.estado === 'USADA').map((c) => c.codigo), 'ENT-00000-X0']);
       validar(candidato, false, punto);
@@ -197,12 +249,12 @@ export default function ControlAcceso() {
       const item = azar(padron.codigos.filter((c) => c.tipo === (destino === 'BARRA' ? 'VOUCHER' : 'PASE') && c.estado === 'VIGENTE'));
       if (!item) return toast('No quedan pases o vouchers vigentes en el padrón', 'info');
       setPunto(destino);
-      validar(destino === 'ESTACIONAMIENTO' && item.patente ? `PAT-${item.patente}` : item.codigo, false, destino);
+      validar(destino === 'ESTACIONAMIENTO' && item.patente ? `PAT-${item.patente}` : qrDelPadron(item), false, destino);
     }
   };
 
   const confirmar = async (r: ResultadoValidacion) => {
-    const confirmado = await validar(r.codigo, true, r.punto);
+    const confirmado = await validar(r.lectura ?? r.codigo, true, r.punto);
     if (confirmado?.confirmado) {
       toast(r.punto === 'PUERTA' ? 'Molinete desbloqueado: entrada marcada como usada' : r.punto === 'ESTACIONAMIENTO' ? 'Ingreso vehicular registrado: barrera abierta' : 'Voucher canjeado: entregá los ítems');
     } else if (confirmado) {
@@ -210,8 +262,16 @@ export default function ControlAcceso() {
     }
   };
 
-  const exportarBitacora = () => {
-    const filas = [['Hora', 'Código', 'Punto', 'Titular / vehículo', 'Ubicación / detalle', 'Resultado', 'Motivo', 'Latencia ms', 'Offline'], ...(resumen?.recientes ?? []).map((v) => [v.fechaHora, v.codigo, v.punto, v.titular ?? '', v.ubicacion ?? '', v.resultado, v.motivo ?? '', v.latenciaMs, v.offline ? 'sí' : 'no'])];
+  const exportarBitacora = async () => {
+    if (!funcionId) return;
+    // El resumen solo trae las últimas lecturas: se pide la bitácora completa de la función
+    let registros: RegistroValidacion[];
+    try {
+      registros = await api.get<RegistroValidacion[]>(`/control/funciones/${funcionId}/bitacora`);
+    } catch (e) {
+      return toast(mensajeError(e), 'error');
+    }
+    const filas = [['Hora', 'Código', 'Punto', 'Titular / vehículo', 'Ubicación / detalle', 'Resultado', 'Motivo', 'Latencia ms', 'Offline'], ...registros.map((v) => [v.fechaHora, v.codigo, v.punto, v.titular ?? '', v.ubicacion ?? '', v.resultado, v.motivo ?? '', v.latenciaMs, v.offline ? 'sí' : 'no'])];
     const csv = '﻿' + filas.map((f) => f.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     Object.assign(document.createElement('a'), { href: url, download: `bitacora-${resumen?.funcion.codigo ?? 'control'}.csv` }).click();
@@ -291,7 +351,13 @@ export default function ControlAcceso() {
         />
         <main className="min-w-0 flex-1 bg-surface">
           {!funciones ? (
-            <Cargando />
+            errorFunciones ? (
+              <div className="p-8">
+                <Aviso tono="peligro">{errorFunciones}</Aviso>
+              </div>
+            ) : (
+              <Cargando />
+            )
           ) : !funciones.length ? (
             <div className="p-8">
               <Aviso tono="info">No hay funciones publicadas desde hoy en adelante.</Aviso>
@@ -414,14 +480,16 @@ export default function ControlAcceso() {
                       </div>
                       <span className="rounded bg-surface-container-highest px-space-xs py-0.5 text-label-xs text-on-surface-variant">CONTINGENCIA</span>
                     </div>
-                    <p className="text-body-sm text-on-surface-variant">Ingresá el código impreso al pie del QR, el DNI del titular o la patente del vehículo.</p>
+                    <p className="text-body-sm text-on-surface-variant">
+                      Ingresá el código impreso al pie del QR <strong className="text-on-surface">seguido de su HASH</strong>, el DNI del titular o la patente del vehículo.
+                    </p>
                     <label className="mt-space-xs flex flex-col gap-1.5">
                       <span className="text-label-xs uppercase tracking-wider text-outline">Código de entrada, voucher o patente</span>
                       <div className="relative flex items-center">
                         <input
                           ref={entradaManual}
                           className="w-full rounded-lg border-0 bg-surface-container-lowest px-space-md py-3 pr-12 font-mono text-headline-md uppercase tracking-wider text-on-surface transition-all focus:outline-none focus:ring-2 focus:ring-primary-container"
-                          placeholder="Ej: #ENT-99210-A5"
+                          placeholder="#ENT-99210-A5 8f9a-11ce-b04d-e921"
                           value={codigo}
                           onChange={(e) => setCodigo(e.target.value)}
                         />
@@ -647,6 +715,7 @@ function TarjetaRechazado({ r, destacado, onTrazabilidad }: { r?: ResultadoValid
     ANULADA: 'Anulado',
     LISTA_NEGRA: 'Lista negra',
     FIRMA_INVALIDA: 'Firma inválida',
+    FIRMA_REQUERIDA: 'Falta el HASH',
     INEXISTENTE: 'Inexistente',
     FORMATO_INVALIDO: 'Formato inválido',
     VIGENTE: 'Punto o función incorrectos',

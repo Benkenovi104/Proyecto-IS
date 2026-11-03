@@ -7,7 +7,7 @@ Implementación funcional del **Caso Integrador** de Ingeniería de Software ([C
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS 3 (tokens del design system *Nocturne Velocity*) |
 | Backend | Node.js + Express 5 + TypeScript |
 | Base de datos | SQLite con Prisma ORM (migraciones + seed) |
-| Pruebas | `node:test` (15 pruebas de integración contra la API real) |
+| Pruebas | `node:test` (23 pruebas de integración contra la API real) |
 
 ## Puesta en marcha
 
@@ -32,7 +32,7 @@ Otros comandos útiles (desde la raíz):
 
 ## Cuentas de demostración
 
-Con `DEMO_MODE=true` (por defecto) la cabecera muestra el **selector de roles** del diseño de Stitch: un clic inicia sesión con la cuenta demo de ese rol.
+Con `DEMO_MODE=true` (lo deja activado el `.env` que crea `npm run setup`; sin esa variable queda apagado) la cabecera muestra el **selector de roles** del diseño de Stitch: un clic inicia sesión con la cuenta demo de ese rol.
 
 | Rol | Email | Contraseña |
 |---|---|---|
@@ -47,7 +47,7 @@ Con `DEMO_MODE=true` (por defecto) la cabecera muestra el **selector de roles** 
 
 1. **Comprador** → *Cosquín Rock 2026*: elegir butacas en el mapa (arranca el contador de 10 min), sumar campo, estacionamiento con patente y consumiciones. En la pasarela simulada probar **Rechazado** (la reserva sigue) y después **Aprobado**.
 2. **Mis Compras**: ver los QR de entrada, pase y voucher; **aceptar** la entrada que transfirió Mariana; transferir una entrada por DNI; pedir el **reembolso** de la orden #TFR-89421 ($ 63.000). La compra de *Stand-Up* (función de mañana) muestra que, a menos de 48 h, ya no se puede devolver.
-3. **Controlador** → elegir *Cosquín Rock*: validar un código (o "Simular QR aprobado"), desbloquear el molinete y volver a escanearlo (rechazado por repetido). Probar `#ENT-88412-C9` (QR revocado por transferencia), `DNI-27111222` (lista negra) y `PAT-AB123CD` en el puesto de estacionamiento. Con "Sincronizar padrón" y el servidor apagado, la terminal sigue validando sin conexión y concilia al volver.
+3. **Controlador** → elegir *Cosquín Rock*: validar un código (escaneándolo, con "Simular QR aprobado" o tipeando el código seguido del HASH que figura debajo del QR en *Mis Compras*), desbloquear el molinete y volver a escanearlo (rechazado por repetido). Probar `#ENT-88412-C9` (QR revocado por transferencia), `DNI-27111222` (lista negra) y `PAT-AB123CD` en el puesto de estacionamiento. Un código tipeado sin su HASH se rechaza. Con "Sincronizar padrón" y el servidor apagado, la terminal sigue validando sin conexión (también contra la lista negra) y concilia al volver con la hora real de cada ingreso.
 4. **Organizador**: editar tarifas y descuentos, habilitar playas y cupos, cargar productos y ver las métricas en vivo. En la segunda función de Cosquín (en borrador), activar "Publicar" muestra qué sectores no tienen precio.
 
 > Las fechas de las funciones del seed son **relativas al día en que se carga la base** (Stand-Up mañana, Cosquín dentro de 4 semanas, etc.). Antes de presentar, corré `npm run db:reset` para tener todo fresco.
@@ -97,7 +97,7 @@ Con `DEMO_MODE=true` (por defecto) la cabecera muestra el **selector de roles** 
 | Reembolso hasta 48 h antes; se anulan los QR antes de reintegrar; los adicionales se devuelven con la última entrada | `domain/reembolsos.ts` |
 | Transferencia con aceptación del destinatario registrado; QR anterior revocado y uno nuevo emitido | `domain/transferencias.ts` |
 | Validación por estado, función y punto de control (puerta, playa, barra), con modo sin conexión | `domain/control.ts`, `Frontend/src/pages/control/offline.ts` |
-| Lista negra verificada al comprar, al transferir y en la puerta | `domain/ocupacion.ts` → `enListaNegra` |
+| Lista negra verificada al comprar, al pagar, al transferir y en la puerta (también sin conexión) | `domain/ocupacion.ts` → `enListaNegra` |
 | No se publica una función con sectores sin precio ni con la sala ocupada | `domain/funciones.ts` |
 
 **Riesgos del plan RMMM ([gestion-riesgos.md](gestion-riesgos.md)) que se mitigan en el código**
@@ -105,9 +105,9 @@ Con `DEMO_MODE=true` (por defecto) la cabecera muestra el **selector de roles** 
 | Riesgo | Mitigación |
 |---|---|
 | R-01 sobreventa | Las operaciones de una misma función se serializan y corren en una transacción; hay una prueba de dos compradores eligiendo la misma butaca a la vez |
-| R-03 fraude con QR | El QR va firmado con HMAC (`TFR1:CÓDIGO:FIRMA`); los códigos revocados se registran para informar el motivo; el uso se marca de forma atómica |
+| R-03 fraude con QR | El QR va firmado con HMAC (`TFR1:CÓDIGO:FIRMA`) y un código tipeado a mano necesita su HASH (DNI y patente se verifican con el documento o el vehículo); los códigos revocados se registran para informar el motivo; el uso se marca de forma atómica |
 | R-04 pasarela asincrónica | Estado `PENDIENTE_PAGO`, extensión única de la reserva y reversa automática de pagos que llegan tarde |
-| R-05 sin conexión en el predio | Padrón local, validación offline, cola de ingresos y conciliación posterior |
+| R-05 sin conexión en el predio | Padrón local con firmas y lista negra, validación offline, cola de ingresos y conciliación posterior |
 | R-08 y R-12 mapa pesado o inaccesible | Selección asistida de la "mejor ubicación disponible" y butacas operables con teclado |
 | R-13 mailing saturado | Los QR se pueden ver siempre desde Mis Compras; los correos se guardan como bandeja simulada |
 
@@ -115,6 +115,6 @@ Con `DEMO_MODE=true` (por defecto) la cabecera muestra el **selector de roles** 
 
 - **Pasarela de pagos y mailing** están simulados: el checkout permite elegir el resultado y los correos se guardan en la tabla `Notificacion`.
 - El **bloqueo contra la sobreventa** está en memoria y alcanza para un solo proceso. Con varias instancias haría falta un lock distribuido (Redis, como dice R-01).
-- El **padrón offline** se guarda en `localStorage` sin cifrar. R-12 pide cifrado; queda pendiente.
+- El **padrón offline** se guarda en `localStorage` sin cifrar e incluye las firmas de los QR (para verificarlos sin conexión). R-12 pide cifrado; queda pendiente.
 - La **cámara** para leer QR funciona en `localhost` o con HTTPS (restricción del navegador). Siempre está disponible el ingreso manual o por lector USB.
 - Si el repositorio queda dentro de **OneDrive**, la sincronización de `node_modules` y de la base SQLite puede volver lento el proyecto o bloquear archivos. Conviene clonarlo en una carpeta que no se sincronice (por ejemplo `C:\dev\ticketfr`).

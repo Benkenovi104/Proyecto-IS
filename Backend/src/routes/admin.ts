@@ -31,11 +31,13 @@ const esquemaSala = z.object({
 
 adminRouter.post('/salas', async (req, res) => {
   const datos = validar(esquemaSala, req.body);
-  const cantidad = await prisma.sala.count();
+  // Siguiente número después del mayor existente (contar salas repetía códigos: el seed arranca en VEN-042)
+  const codigos = await prisma.sala.findMany({ select: { codigo: true } });
+  const ultimo = Math.max(41, ...codigos.map((s) => Number(/^VEN-(\d+)$/.exec(s.codigo)?.[1] ?? 0)));
   const sala = await prisma.sala.create({
     data: {
       ...datos,
-      codigo: `VEN-${String(cantidad + 41).padStart(3, '0')}`,
+      codigo: `VEN-${String(ultimo + 1).padStart(3, '0')}`,
       escenarios: { create: { nombre: 'Escenario Principal', esBase: true, posX: 180, posY: 24, ancho: 500, alto: 105 } },
     },
   });
@@ -89,6 +91,7 @@ const esquemaPlaya = z.object({
 adminRouter.post('/salas/:id/playas', async (req, res) => {
   const salaId = idParam(req.params.id);
   const datos = validar(esquemaPlaya, req.body);
+  if (!(await prisma.sala.findUnique({ where: { id: salaId }, select: { id: true } }))) throw noEncontrado('La sala no existe');
   res.status(201).json(await prisma.playaEstacionamiento.create({ data: { ...datos, salaId } }));
 });
 
@@ -96,7 +99,7 @@ adminRouter.patch('/playas/:id', async (req, res) => {
   const id = idParam(req.params.id);
   const datos = validar(esquemaPlaya.partial(), req.body);
   if (datos.capacidadTotal !== undefined) {
-    const mayorCupo = await prisma.tarifaEstacionamiento.findFirst({ where: { playaId: id }, orderBy: { cupoHabilitado: 'desc' } });
+    const mayorCupo = await prisma.tarifaEstacionamiento.findFirst({ where: { playaId: id, habilitada: true }, orderBy: { cupoHabilitado: 'desc' } });
     if (mayorCupo && mayorCupo.cupoHabilitado > datos.capacidadTotal) {
       throw conflicto(`Hay funciones con ${mayorCupo.cupoHabilitado} cocheras habilitadas en esta playa`, 'CAPACIDAD_INSUFICIENTE');
     }
@@ -106,9 +109,13 @@ adminRouter.patch('/playas/:id', async (req, res) => {
 
 adminRouter.delete('/playas/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  const pases = await prisma.paseEstacionamiento.count({ where: { tarifa: { playaId: id }, estado: { not: 'ANULADA' } } });
-  if (pases) throw conflicto('La playa tiene pases emitidos: deshabilitala en lugar de eliminarla', 'PLAYA_CON_PASES');
-  await prisma.playaEstacionamiento.delete({ where: { id } });
+  // Los pases vendidos (aun reembolsados) son historial; los de reservas vencidas no
+  const emitidos = await prisma.paseEstacionamiento.count({ where: { tarifa: { playaId: id }, compra: { estado: { not: 'VENCIDA' } } } });
+  if (emitidos) throw conflicto('La playa tiene pases emitidos: deshabilitala en lugar de eliminarla', 'PLAYA_CON_PASES');
+  await prisma.$transaction([
+    prisma.paseEstacionamiento.deleteMany({ where: { tarifa: { playaId: id }, compra: { estado: 'VENCIDA' } } }),
+    prisma.playaEstacionamiento.delete({ where: { id } }),
+  ]);
   res.status(204).end();
 });
 

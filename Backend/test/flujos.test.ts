@@ -7,6 +7,9 @@ import { after, before, test } from 'node:test';
 
 process.env.DATABASE_URL = 'file:./test.db';
 process.env.PASARELA_WEBHOOK_SEGUNDOS = '1';
+process.env.DEMO_MODE = 'true';
+process.env.JWT_SECRET ??= 'secreto-jwt-de-prueba';
+process.env.QR_SECRET ??= 'secreto-qr-de-prueba';
 execSync('npx prisma migrate reset --force --skip-generate', { stdio: 'ignore', env: process.env });
 
 const { crearApp } = await import('../src/app');
@@ -190,10 +193,11 @@ test('control de acceso: aprobado, repetido, revocado, lista negra, punto incorr
   const validar = (codigo: string, punto = 'PUERTA', confirmar = false) =>
     api('POST', '/control/validaciones', { token, body: { codigo, punto, funcionId: f.id, confirmar } });
 
-  const qrLucas = await api('POST', '/auth/demo', { body: { rol: 'COMPRADOR' } }).then(async (r) => {
+  const compraLucas = await api('POST', '/auth/demo', { body: { rol: 'COMPRADOR' } }).then(async (r) => {
     const compras = await api('GET', '/compras/mias', { token: r.data.token });
-    return compras.data.compras.find((c: any) => c.codigo === 'TFR-89421').entradas[0].qr as string;
+    return compras.data.compras.find((c: any) => c.codigo === 'TFR-89421');
   });
+  const qrLucas = compraLucas.entradas[0].qr as string;
 
   const verificado = await validar(qrLucas);
   assert.equal(verificado.data.resultado, 'APROBADO');
@@ -217,7 +221,10 @@ test('control de acceso: aprobado, repetido, revocado, lista negra, punto incorr
   assert.match(paseEnPuerta.data.motivo, /estacionamiento/);
   const pase = await validar('PAT-AB 123 CD', 'ESTACIONAMIENTO', true);
   assert.equal(pase.data.confirmado, true);
-  const voucher = await validar('VCH-3918-B', 'BARRA', true);
+  const sinHash = await validar('VCH-3918-B', 'BARRA', true);
+  assert.equal(sinHash.data.estadoCodigo, 'FIRMA_REQUERIDA', 'un código tipeado sin HASH no habilita el canje');
+  assert.equal(sinHash.data.confirmado, false);
+  const voucher = await validar(`VCH-3918-B ${compraLucas.voucher.hash}`, 'BARRA', true);
   assert.equal(voucher.data.confirmado, true);
   assert.equal(voucher.data.pin, '7741');
 
@@ -257,7 +264,7 @@ test('transferencia: requiere aceptación y regenera el QR (el anterior queda re
   const f = await funcionCosquin();
   const viejo = await api('POST', '/control/validaciones', { token: control, body: { codigo: codigoAnterior, punto: 'PUERTA', funcionId: f.id } });
   assert.equal(viejo.data.estadoCodigo, 'REVOCADO');
-  const nuevo = await api('POST', '/control/validaciones', { token: control, body: { codigo: recibida.codigo, punto: 'PUERTA', funcionId: f.id } });
+  const nuevo = await api('POST', '/control/validaciones', { token: control, body: { codigo: recibida.qr, punto: 'PUERTA', funcionId: f.id } });
   assert.equal(nuevo.data.resultado, 'APROBADO');
   assert.equal(nuevo.data.titular.dni, destino.dni);
 });
@@ -343,4 +350,153 @@ test('roles: un comprador no accede al backoffice', async () => {
   assert.equal((await api('GET', '/admin/salas', { token })).status, 403);
   assert.equal((await api('GET', '/org/panel', { token })).status, 403);
   assert.equal((await api('GET', '/compras/mias')).status, 401);
+});
+
+// ─── Regresiones de la revisión ──────────────────────────────────────────────
+
+const funcionLiga = () => prisma.funcion.findUniqueOrThrow({ where: { codigo: 'FUN-LIGA26-01' } });
+
+test('administrador: una sala nueva recibe un código libre', async () => {
+  const token = await login('admin@ticketfr.com', 'admin123');
+  const r = await api('POST', '/admin/salas', { token, body: { nombre: 'Sala de prueba', direccion: 'Calle 123', capacidad: 500 } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.equal(r.data.codigo, 'VEN-045');
+});
+
+test('transferencia: aceptar dos veces a la vez no la deja cancelada', async () => {
+  const lucas = await login('comprador@ticketfr.com');
+  const t = await prisma.transferenciaEntrada.findFirstOrThrow({ where: { estado: 'PENDIENTE', destinatario: { email: 'comprador@ticketfr.com' } } });
+  const respuestas = await Promise.all([1, 2].map(() => api('POST', `/transferencias/${t.id}/aceptar`, { token: lucas })));
+  assert.deepEqual(respuestas.map((r) => r.status).sort(), [200, 409]);
+  const despues = await prisma.transferenciaEntrada.findUniqueOrThrow({ where: { id: t.id }, include: { entrada: { include: { titular: true } } } });
+  assert.equal(despues.estado, 'ACEPTADA');
+  assert.equal(despues.entrada.titular.email, 'comprador@ticketfr.com');
+  const avisos = await prisma.notificacion.count({ where: { para: 'mariana.rojas@email.com', asunto: 'Transferencia cancelada' } });
+  assert.equal(avisos, 0, 'al cedente no le llega un aviso de cancelación falso');
+});
+
+test('transferencia: DNI y email de personas distintas se rechaza; "cedida por" es el último cedente', async () => {
+  const lucas = await login('comprador@ticketfr.com');
+  const mias = await api('GET', '/compras/mias', { token: lucas });
+  const recibida = mias.data.entradasRecibidas[0];
+  const mariana = await prisma.usuario.findUniqueOrThrow({ where: { email: 'mariana.rojas@email.com' } });
+  const mezcla = await api('POST', `/entradas/${recibida.id}/transferencias`, { token: lucas, body: { dni: mariana.dni, email: 'comprador9@email.com' } });
+  assert.equal(mezcla.status, 400);
+  assert.equal(mezcla.data.code, 'DESTINATARIO_INCONSISTENTE');
+
+  // Mariana → Lucas → comprador9: a comprador9 se la cedió Lucas
+  const t = await api('POST', `/entradas/${recibida.id}/transferencias`, { token: lucas, body: { email: 'comprador9@email.com' } });
+  assert.equal(t.status, 201);
+  const aceptada = await api('POST', `/transferencias/${t.data.id}/aceptar`, { token: await login('comprador9@email.com') });
+  assert.equal(aceptada.data.entradasRecibidas.find((e: any) => e.id === recibida.id).cedidaPor.email, 'comprador@ticketfr.com');
+});
+
+test('estacionamiento: deshabilitar una playa con pases anulados y patente opcional según la función', async () => {
+  const admin = await login('admin@ticketfr.com', 'admin123');
+  const comprador = await login('comprador45@email.com');
+  const f = await funcionLiga();
+  const campo = await sector(f.salaId, 'SEC-CMP-01');
+  const tarifa = await prisma.tarifaEstacionamiento.findFirstOrThrow({ where: { funcionId: f.id } });
+  const playas = await prisma.playaEstacionamiento.findMany({ where: { salaId: f.salaId } });
+  const configurar = (exigePatente: boolean, habilitada: boolean) =>
+    api('PUT', `/org/funciones/${f.id}/estacionamiento`, {
+      token: admin,
+      body: {
+        exigePatente,
+        aperturaPlaya: null,
+        playas: playas.map((p) => ({ playaId: p.id, habilitada: habilitada && p.id === tarifa.playaId, precio: 6000, cupoHabilitado: 50 })),
+      },
+    });
+
+  const reserva = await api('POST', '/compras/reserva/entradas', { token: comprador, body: { funcionId: f.id, sectorId: campo.id } });
+  const conPatente = await api('PUT', `/compras/${reserva.data.id}/adicionales`, { token: comprador, body: { estacionamiento: [{ tarifaId: tarifa.id, patente: 'AA111BB' }] } });
+  assert.equal(conPatente.status, 200);
+  assert.equal((await api('DELETE', `/compras/${reserva.data.id}`, { token: comprador })).status, 204);
+
+  const deshabilitar = await configurar(true, false);
+  assert.equal(deshabilitar.status, 200, JSON.stringify(deshabilitar.data));
+  assert.equal((await api('GET', `/funciones/${f.id}`)).data.estacionamiento.length, 0);
+
+  assert.equal((await configurar(false, true)).status, 200);
+  const otra = await api('POST', '/compras/reserva/entradas', { token: comprador, body: { funcionId: f.id, sectorId: campo.id } });
+  const sinPatente = await api('PUT', `/compras/${otra.data.id}/adicionales`, { token: comprador, body: { estacionamiento: [{ tarifaId: tarifa.id }] } });
+  assert.equal(sinPatente.status, 200, JSON.stringify(sinPatente.data));
+  assert.equal(sinPatente.data.pases[0].patente, null);
+
+  assert.equal((await configurar(true, true)).status, 200);
+  const exigida = await api('PUT', `/compras/${otra.data.id}/adicionales`, { token: comprador, body: { estacionamiento: [{ tarifaId: tarifa.id }] } });
+  assert.equal(exigida.data.code, 'PATENTE_REQUERIDA');
+  await api('DELETE', `/compras/${otra.data.id}`, { token: comprador });
+});
+
+test('administrador: se puede borrar un sector que solo tuvo reservas vencidas', async () => {
+  const admin = await login('admin@ticketfr.com', 'admin123');
+  const comprador = await login('comprador46@email.com');
+  const f = await funcionLiga();
+  const detalle = (await api('GET', `/admin/salas/${f.salaId}`, { token: admin })).data;
+  const mapa = (sectores: unknown[]) => ({ escenario: detalle.escenario, sectores });
+  const nuevo = { codigo: 'SEC-TST-01', nombre: 'Sector de prueba', numerado: false, cupoMaximo: 10, filas: 0, butacasPorFila: 0, color: 'rose', forma: 'RECT', posX: 10, posY: 10, ancho: 100, alto: 60 };
+
+  const alta = await api('PUT', `/admin/salas/${f.salaId}/mapa`, { token: admin, body: mapa([...detalle.sectores, nuevo]) });
+  const creado = alta.data.sectores.find((s: any) => s.codigo === 'SEC-TST-01');
+  await api('PUT', `/org/funciones/${f.id}/tarifas`, { token: admin, body: { tarifas: [{ sectorId: creado.id, precio: 1000, descuento: null }] } });
+  const reserva = await api('POST', '/compras/reserva/entradas', { token: comprador, body: { funcionId: f.id, sectorId: creado.id } });
+  await api('DELETE', `/compras/${reserva.data.id}`, { token: comprador });
+  assert.equal((await api('GET', `/admin/salas/${f.salaId}`, { token: admin })).data.sectores.find((s: any) => s.id === creado.id).entradasEmitidas, 0);
+
+  const baja = await api('PUT', `/admin/salas/${f.salaId}/mapa`, { token: admin, body: mapa(detalle.sectores) });
+  assert.equal(baja.status, 200, JSON.stringify(baja.data));
+  assert.equal(await prisma.sector.count({ where: { id: creado.id } }), 0);
+});
+
+test('control: un código tipeado necesita su HASH; la conciliación offline guarda la hora real', async () => {
+  const control = await login('controlador@ticketfr.com', 'controlador123');
+  const f = await funcionCosquin();
+  const destino = await api('GET', '/compras/mias', { token: await login('comprador7@email.com') });
+  const entrada = destino.data.entradasRecibidas[0];
+  const validar = (codigo: string) => api('POST', '/control/validaciones', { token: control, body: { codigo, punto: 'PUERTA', funcionId: f.id } });
+
+  assert.equal((await validar(`#${entrada.codigo}`)).data.estadoCodigo, 'FIRMA_REQUERIDA');
+  assert.equal((await validar(`#${entrada.codigo} ${entrada.hash}`)).data.resultado, 'APROBADO');
+  assert.equal((await validar(`#${entrada.codigo} 0000-0000-0000-0000`)).data.estadoCodigo, 'FIRMA_INVALIDA');
+
+  const padron = await api('GET', `/control/funciones/${f.id}/padron`, { token: control });
+  assert.ok(padron.data.listaNegra.includes('27111222'), 'el padrón lleva la lista negra para el modo offline');
+  assert.ok(padron.data.codigos.every((c: any) => /^[0-9a-f]{16}$/.test(c.firma)));
+
+  const horaIngreso = new Date(Date.now() - 2 * 3600_000);
+  const sync = await api('POST', '/control/sincronizar', {
+    token: control,
+    body: { funcionId: f.id, operaciones: [{ codigo: entrada.codigo, punto: 'PUERTA', fechaHora: horaIngreso.toISOString() }] },
+  });
+  assert.equal(sync.data.aplicadas, 1);
+  const usada = await prisma.entrada.findUniqueOrThrow({ where: { id: entrada.id } });
+  assert.equal(usada.usadaEn?.getTime(), horaIngreso.getTime());
+});
+
+test('pago: la lista negra se vuelve a verificar al pagar', async () => {
+  const admin = await login('admin@ticketfr.com', 'admin123');
+  const comprador = await login('comprador47@email.com');
+  const f = await funcionLiga();
+  const campo = await sector(f.salaId, 'SEC-CMP-01');
+  const reserva = await api('POST', '/compras/reserva/entradas', { token: comprador, body: { funcionId: f.id, sectorId: campo.id } });
+  const { dni } = await prisma.usuario.findUniqueOrThrow({ where: { email: 'comprador47@email.com' } });
+  const alta = await api('POST', '/admin/lista-negra', { token: admin, body: { dni, motivo: 'Prueba de pago bloqueado' } });
+
+  const pago = await api('POST', `/compras/${reserva.data.id}/pagar`, { token: comprador, body: {} });
+  assert.equal(pago.status, 403);
+  assert.equal((await prisma.compra.findUniqueOrThrow({ where: { id: reserva.data.id } })).estado, 'VENCIDA');
+  await api('DELETE', `/admin/lista-negra/${alta.data.id}`, { token: admin });
+});
+
+test('ids inexistentes responden 404 en lugar de 500', async () => {
+  const admin = await login('admin@ticketfr.com', 'admin123');
+  const control = await login('controlador@ticketfr.com', 'controlador123');
+  const respuestas = await Promise.all([
+    api('POST', '/control/validaciones', { token: control, body: { codigo: 'ENT-00000-X0', punto: 'PUERTA', funcionId: 99999 } }),
+    api('PATCH', '/admin/salas/99999', { token: admin, body: { nombre: 'No existe' } }),
+    api('DELETE', '/admin/lista-negra/99999', { token: admin }),
+    api('POST', '/admin/salas/99999/playas', { token: admin, body: { nombre: 'Playa X', capacidadTotal: 10 } }),
+  ]);
+  assert.deepEqual(respuestas.map((r) => r.status), [404, 404, 404, 404]);
 });

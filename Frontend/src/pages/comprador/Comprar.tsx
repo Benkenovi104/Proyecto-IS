@@ -47,7 +47,7 @@ export default function Comprar() {
       setConEstacionamiento(!!pase);
       if (pase) {
         setTarifaId(pase.tarifaId);
-        setPatente(pase.patente);
+        setPatente(pase.patente ?? '');
       }
       setCantidades(Object.fromEntries(reserva.voucher?.items.map((i) => [i.productoId, i.cantidad]) ?? []));
     }
@@ -102,9 +102,12 @@ export default function Comprar() {
 
   const patenteNormalizada = normalizarPatente(patente);
   const patenteOk = PATENTE_VALIDA.test(patenteNormalizada);
+  const exigePatente = funcion?.exigePatente ?? true;
+  // Sin patente solo si la función no la exige; si se escribió una, tiene que ser válida
+  const patenteLista = patenteOk || (!exigePatente && !patenteNormalizada);
 
   const cuerpoAdicionales = (cant = cantidades, estac = conEstacionamiento) => ({
-    estacionamiento: estac && tarifaId && patenteOk ? [{ tarifaId, patente: patenteNormalizada }] : [],
+    estacionamiento: estac && tarifaId && patenteLista ? [{ tarifaId, patente: patenteNormalizada || null }] : [],
     consumiciones: Object.entries(cant).map(([productoId, cantidad]) => ({ productoId: Number(productoId), cantidad })),
   });
 
@@ -131,8 +134,13 @@ export default function Comprar() {
 
   const abrirPago = async () => {
     if (!reserva) return;
-    if (conEstacionamiento && !patenteOk) {
-      toast('Ingresá una patente válida (AB 123 CD o ABC 123) para el pase de estacionamiento', 'error');
+    if (conEstacionamiento && !patenteLista) {
+      toast(
+        exigePatente
+          ? 'Ingresá una patente válida (AB 123 CD o ABC 123) para el pase de estacionamiento'
+          : 'La patente ingresada no es válida (AB 123 CD o ABC 123): corregila o dejala vacía',
+        'error',
+      );
       return;
     }
     setOcupado(true);
@@ -432,14 +440,14 @@ export default function Comprar() {
                         </select>
                       </label>
                       <label className="block">
-                        <span className="mb-1 block text-[11px] text-on-surface-variant">Patente del vehículo (obligatoria):</span>
+                        <span className="mb-1 block text-[11px] text-on-surface-variant">Patente del vehículo ({exigePatente ? 'obligatoria' : 'opcional'}):</span>
                         <input
                           className={cx('campo-mono py-1.5 uppercase text-secondary', patente && !patenteOk && 'border-red-500/60')}
                           placeholder="Ej: AB 123 CD"
                           value={patente}
                           maxLength={10}
                           onChange={(e) => setPatente(e.target.value.toUpperCase())}
-                          onBlur={() => patenteOk && reserva && ejecutar(() => sincronizar(), false)}
+                          onBlur={() => patenteLista && reserva && ejecutar(() => sincronizar(), false)}
                         />
                         {patente && !patenteOk && <span className="mt-1 block text-[11px] text-red-400">Formato Mercosur (AB 123 CD) o anterior (ABC 123)</span>}
                       </label>

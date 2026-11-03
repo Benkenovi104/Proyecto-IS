@@ -31,14 +31,36 @@ export const guardarPadron = (padron: Padron) => escribir(clavePadron(padron.fun
 export const colaPendiente = (funcionId: number) => leer<OperacionPendiente[]>(claveCola(funcionId)) ?? [];
 export const vaciarCola = (funcionId: number) => escribir(claveCola(funcionId), []);
 
+/** Refleja en el padrón local un ingreso confirmado en línea (así no se puede repetir si se corta la conexión). */
+export function marcarUsadoLocal(funcionId: number, codigo: string) {
+  const padron = padronLocal(funcionId);
+  const item = padron?.codigos.find((c) => c.codigo === codigo);
+  if (!padron || !item) return;
+  item.estado = 'USADA';
+  guardarPadron(padron);
+}
+
+/** Contenido de un QR firmado a partir del padrón (las simulaciones leen como un escáner real). */
+export const qrDelPadron = (c: Padron['codigos'][number]) => (c.firma ? `TFR1:${c.codigo}:${c.firma}` : c.codigo);
+
 const PUNTO: Record<string, PuntoControl> = { ENTRADA: 'PUERTA', PASE: 'ESTACIONAMIENTO', VOUCHER: 'BARRA' };
 
-/** Misma lógica que el servidor, sobre el padrón local. No puede verificar la firma del QR. */
+// Mismos formatos que el servidor (Backend/src/lib/codigos.ts → leerCodigo)
+const QR_FIRMADO = /^TFR1:([A-Z0-9-]+):([0-9a-f]{16})$/i;
+const CODIGO_CON_HASH = /^#?([A-Z0-9-]+)\s+([0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4})$/i;
+
+/**
+ * Misma lógica que el servidor, sobre el padrón local. La firma se verifica contra la que trae
+ * el padrón (no hace falta el secreto); un código tipeado sin HASH no habilita el acceso.
+ */
 export function validarOffline(funcionId: number, entrada: string, punto: PuntoControl, confirmar: boolean): ResultadoValidacion {
   const inicio = performance.now();
   const padron = padronLocal(funcionId);
-  const qr = /^TFR1:([A-Z0-9-]+):[0-9a-f]+$/i.exec(entrada.trim());
-  let codigo = (qr ? qr[1] : entrada).toUpperCase().replace(/^#/, '').replace(/\s+/g, '');
+  const texto = entrada.trim();
+  const firmado = QR_FIRMADO.exec(texto) ?? CODIGO_CON_HASH.exec(texto);
+  const firma = firmado ? firmado[2].replace(/-/g, '').toLowerCase() : null;
+  let codigo = (firmado ? firmado[1] : texto).toUpperCase().replace(/^#/, '').replace(/\s+/g, '');
+  const porDocumento = codigo.startsWith('DNI-') || codigo.startsWith('PAT-');
   const r: ResultadoValidacion = {
     resultado: 'RECHAZADO',
     confirmado: false,
@@ -90,11 +112,24 @@ export function validarOffline(funcionId: number, entrada: string, punto: PuntoC
     return terminar();
   }
 
+  if (firma && item.firma && firma !== item.firma) {
+    Object.assign(r, { estadoCodigo: 'FIRMA_INVALIDA', motivo: 'La firma del QR no es válida: posible código adulterado' });
+    return terminar();
+  }
+
   codigo = item.codigo;
   Object.assign(r, { codigo, tipo: item.tipo, estadoCodigo: item.estado, titular: { nombre: item.titular, dni: item.dni }, ubicacion: item.detalle });
   if (item.estado === 'USADA') r.motivo = 'Este código ya fue utilizado (registro local)';
   else if (item.estado === 'ANULADA') r.motivo = 'Código anulado';
   else if (PUNTO[item.tipo] !== punto) r.motivo = 'El código corresponde a otro punto de control';
+  else if (item.tipo === 'ENTRADA' && item.dni && padron.listaNegra?.includes(item.dni)) {
+    Object.assign(r, { estadoCodigo: 'LISTA_NEGRA', motivo: 'El titular figura en la lista negra (derecho de admisión)' });
+  } else if (!porDocumento && !firma) {
+    Object.assign(r, {
+      estadoCodigo: 'FIRMA_REQUERIDA',
+      motivo: 'Código tipeado sin el HASH: ingresalo junto con el HASH impreso debajo del QR, o validá por DNI / patente',
+    });
+  }
   if (r.motivo) return terminar();
 
   r.resultado = 'APROBADO';

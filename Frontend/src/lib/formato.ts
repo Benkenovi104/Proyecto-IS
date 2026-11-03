@@ -67,6 +67,17 @@ export const NOMBRE_CATEGORIA: Record<Categoria, string> = {
   OTRO: 'Otros espectáculos',
 };
 
+/** Letras de fila: A..Z, AA, AB, ... (igual que el backend al generar la matriz de butacas). */
+export function letraFila(indice: number): string {
+  let n = indice;
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
 /** mm:ss restantes hasta una fecha (o null si ya pasó). */
 export function cuentaRegresiva(hasta: string, ahora: number) {
   const ms = new Date(hasta).getTime() - ahora;

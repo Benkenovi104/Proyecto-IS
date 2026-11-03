@@ -1,5 +1,5 @@
 // Cabecera común (pantallas 2 y 5 de Stitch): marca, selector de roles y sesión activa.
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { RUTA_INICIO, useAuth } from '../auth/AuthContext';
 import { mensajeError } from '../lib/api';
@@ -29,6 +29,18 @@ export function Cabecera({ subbarra }: { subbarra?: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const [cambiando, setCambiando] = useState<Rol | null>(null);
 
+  // Las barras laterales se pegan debajo de la cabecera: su alto varía si la subbarra ocupa dos líneas
+  const cabecera = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = cabecera.current;
+    if (!el) return;
+    const medir = () => document.documentElement.style.setProperty('--alto-cabecera', `${el.offsetHeight}px`);
+    medir();
+    const observador = new ResizeObserver(medir);
+    observador.observe(el);
+    return () => observador.disconnect();
+  }, []);
+
   const cambiarRol = async (rol: Rol) => {
     if (usuario?.rol === rol) return navegar(RUTA_INICIO[rol]);
     setCambiando(rol);
@@ -52,7 +64,7 @@ export function Cabecera({ subbarra }: { subbarra?: ReactNode }) {
     : null;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-nv-line bg-surface-container-lowest/95 shadow-[0_1px_8px_rgba(0,0,0,0.5)] backdrop-blur-xl">
+    <header ref={cabecera} className="sticky top-0 z-50 border-b border-nv-line bg-surface-container-lowest/95 shadow-[0_1px_8px_rgba(0,0,0,0.5)] backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-gutter-lg">
         <Link to={usuario ? RUTA_INICIO[usuario.rol] : '/cartelera'} className="flex min-w-max items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary-container bg-primary-container/20 text-secondary shadow-glow-primary">
@@ -188,10 +200,13 @@ export interface ItemLateral {
   deshabilitado?: boolean;
 }
 
+/** Posición de una barra lateral pegada debajo de la cabecera (Cabecera publica su alto en --alto-cabecera). */
+export const ESTILO_LATERAL = { top: 'var(--alto-cabecera, 7rem)', height: 'calc(100vh - var(--alto-cabecera, 7rem))' };
+
 /** Barra lateral del backoffice (260px, se oculta en pantallas chicas). */
 export function BarraLateral({ grupos, pie }: { grupos: { titulo?: string; items: ItemLateral[] }[]; pie?: ReactNode }) {
   return (
-    <aside className="sticky top-28 hidden h-[calc(100vh-7rem)] w-64 shrink-0 flex-col justify-between border-r border-nv-line bg-surface-container-lowest py-space-md lg:flex">
+    <aside style={ESTILO_LATERAL} className="sticky hidden w-64 shrink-0 flex-col justify-between border-r border-nv-line bg-surface-container-lowest py-space-md lg:flex">
       <div className="flex-1 overflow-y-auto px-space-sm">
         {grupos.map((g, i) => (
           <div key={i} className={cx(i > 0 && 'mt-6')}>

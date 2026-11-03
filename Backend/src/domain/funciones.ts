@@ -68,7 +68,7 @@ export async function detalleFuncion(funcionId: number, usuario?: UsuarioAutenti
   const { butacasOcupadas, ocupadasPorSector } = await ocupacionFuncion(prisma, funcion.id);
   const estacionamiento = await Promise.all(
     funcion.tarifasEstacionamiento
-      .filter((t) => t.playa.habilitada)
+      .filter((t) => t.habilitada && t.playa.habilitada)
       .map(async (t) => ({
         tarifaId: t.id,
         playaId: t.playaId,

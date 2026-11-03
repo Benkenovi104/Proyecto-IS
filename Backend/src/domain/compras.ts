@@ -15,6 +15,7 @@ import {
   EXTENSION_PENDIENTE_MINUTOS,
   MAX_ENTRADAS_POR_FUNCION,
   RESERVA_MINUTOS,
+  compararFilas,
   formatearPatente,
   normalizarPatente,
   patenteValida,
@@ -99,7 +100,7 @@ export function serializarCompra(c: CompraDetalle, viewerId: number) {
     const mostrarQR = !!p.codigoQR && p.estado !== 'ANULADA';
     return {
       id: p.id,
-      patente: formatearPatente(p.patente),
+      patente: p.patente ? formatearPatente(p.patente) : null,
       precio: p.precio,
       estado: p.estado,
       usadoEn: p.usadoEn,
@@ -119,6 +120,7 @@ export function serializarCompra(c: CompraDetalle, viewerId: number) {
         canjeadoEn: v.canjeadoEn,
         codigo: v.codigoQR,
         qr: v.codigoQR && v.estado !== 'ANULADA' ? contenidoQR(v.codigoQR) : null,
+        hash: v.codigoQR && v.estado !== 'ANULADA' ? hashVisible(v.codigoQR) : null,
         items: v.items.map((i) => ({
           productoId: i.productoId,
           nombre: i.producto.nombre,
@@ -203,12 +205,21 @@ export async function misCompras(usuario: UsuarioAutenticado) {
       orderBy: { fechaHora: 'desc' },
     }),
   ]);
+  // Quien la cedió es el último cedente, no el comprador original (A → B → C: a C se la cedió B)
+  const aceptadas = await prisma.transferenciaEntrada.findMany({
+    where: { destinatarioId: usuario.id, estado: 'ACEPTADA', entradaId: { in: recibidas.map((e) => e.id) } },
+    include: { cedente: usuarioBasico },
+    orderBy: { fechaRespuesta: 'desc' },
+  });
+  const cedentes = new Map<number, (typeof aceptadas)[number]['cedente']>();
+  for (const t of aceptadas) if (!cedentes.has(t.entradaId)) cedentes.set(t.entradaId, t.cedente);
+
   return {
     compras: compras.map((c) => serializarCompra(c, usuario.id)),
     entradasRecibidas: recibidas.map((e) => ({
       ...serializarEntrada(e, usuario.id),
       funcion: serializarFuncionResumen(e.funcion),
-      cedidaPor: e.compra.comprador,
+      cedidaPor: cedentes.get(e.id) ?? e.compra.comprador,
     })),
     transferenciasPendientes: pendientes.map((t) => ({
       id: t.id,
@@ -301,7 +312,8 @@ export async function agregarEntrada(
           butacaId = butaca.id;
         } else {
           // Asignación automática: primera butaca libre (fila y número ascendentes)
-          const butacas = await tx.butaca.findMany({ where: { sectorId: sector.id }, orderBy: [{ fila: 'asc' }, { numero: 'asc' }] });
+          const butacas = await tx.butaca.findMany({ where: { sectorId: sector.id } });
+          butacas.sort((a, b) => compararFilas(a.fila, b.fila) || a.numero - b.numero);
           const libre = butacas.find((b) => !butacasOcupadas.has(b.id));
           if (!libre) throw conflicto(`${sector.nombre} está agotado`, 'SECTOR_AGOTADO');
           butacaId = libre.id;
@@ -385,7 +397,7 @@ export async function cancelarReserva(usuario: UsuarioAutenticado, compraId: num
 }
 
 export interface DatosAdicionales {
-  estacionamiento: { tarifaId: number; patente: string }[];
+  estacionamiento: { tarifaId: number; patente?: string | null }[];
   consumiciones: { productoId: number; cantidad: number }[];
 }
 
@@ -405,17 +417,22 @@ export async function actualizarAdicionales(usuario: UsuarioAutenticado, compraI
           where: { id: pedido.tarifaId, funcionId: compra.funcionId },
           include: { playa: true },
         });
-        if (!tarifa || !tarifa.playa.habilitada) throw noEncontrado('La playa no está habilitada para esta función');
-        const patente = normalizarPatente(pedido.patente);
-        if (!patenteValida(patente)) {
-          throw solicitudInvalida(`La patente "${pedido.patente}" no es válida (formato AB 123 CD o ABC 123)`, 'PATENTE_INVALIDA');
+        if (!tarifa || !tarifa.habilitada || !tarifa.playa.habilitada) throw noEncontrado('La playa no está habilitada para esta función');
+        const patente = pedido.patente ? normalizarPatente(pedido.patente) : null;
+        if (!patente && funcion.exigePatente) {
+          throw solicitudInvalida('Esta función exige la patente del vehículo para el pase de estacionamiento', 'PATENTE_REQUERIDA');
         }
-        if (patentes.has(patente)) throw solicitudInvalida('Ingresaste la misma patente dos veces', 'PATENTE_REPETIDA');
-        patentes.add(patente);
-        const yaTienePase = await tx.paseEstacionamiento.findFirst({
-          where: { patente, estado: { in: ENTRADAS_OCUPAN }, tarifa: { funcionId: funcion.id }, compra: { estado: 'PAGADA' } },
-        });
-        if (yaTienePase) throw conflicto(`El vehículo ${formatearPatente(patente)} ya tiene un pase para esta función`, 'PATENTE_CON_PASE');
+        if (patente) {
+          if (!patenteValida(patente)) {
+            throw solicitudInvalida(`La patente "${pedido.patente}" no es válida (formato AB 123 CD o ABC 123)`, 'PATENTE_INVALIDA');
+          }
+          if (patentes.has(patente)) throw solicitudInvalida('Ingresaste la misma patente dos veces', 'PATENTE_REPETIDA');
+          patentes.add(patente);
+          const yaTienePase = await tx.paseEstacionamiento.findFirst({
+            where: { patente, estado: { in: ENTRADAS_OCUPAN }, tarifa: { funcionId: funcion.id }, compra: { estado: 'PAGADA' } },
+          });
+          if (yaTienePase) throw conflicto(`El vehículo ${formatearPatente(patente)} ya tiene un pase para esta función`, 'PATENTE_CON_PASE');
+        }
         if ((await pasesActivos(tx, tarifa.id)) >= tarifa.cupoHabilitado) {
           throw conflicto(`No quedan cocheras disponibles en ${tarifa.playa.nombre}`, 'SIN_CUPO_ESTACIONAMIENTO');
         }
@@ -499,13 +516,22 @@ export async function pagar(usuario: UsuarioAutenticado, compraId: number, simul
     prisma.$transaction(async (tx) => {
       const compra = await tx.compra.findUniqueOrThrow({
         where: { id: compraId },
-        include: { entradas: true, pases: true, voucher: { include: { items: true } } },
+        include: { funcion: true, entradas: true, pases: true, voucher: { include: { items: true } } },
       });
       if (compra.estado === 'PAGADA') return { tipo: 'aprobado' as const };
       if (compra.estado !== 'RESERVADA') throw conflicto('La compra no se puede pagar en su estado actual', 'COMPRA_NO_PAGABLE');
       if (compra.fechaExpiracionReserva <= new Date()) {
         await liberarReserva(tx, compraId);
         return { tipo: 'vencida' as const };
+      }
+      // La reserva pudo hacerse antes de que empezara la función o de que el DNI entrara en la lista negra
+      if (compra.funcion.fechaHora <= new Date()) {
+        await liberarReserva(tx, compraId);
+        return { tipo: 'iniciada' as const };
+      }
+      if (await enListaNegra(tx, usuario.dni)) {
+        await liberarReserva(tx, compraId);
+        return { tipo: 'bloqueado' as const };
       }
       const entradas = compra.entradas.filter((e) => e.estado === 'VIGENTE');
       if (!entradas.length) throw solicitudInvalida('La reserva no tiene entradas', 'RESERVA_VACIA');
@@ -528,6 +554,10 @@ export async function pagar(usuario: UsuarioAutenticado, compraId: number, simul
 
   if (resultado.tipo === 'vencida') {
     throw new HttpError(410, 'Tu reserva de 10 minutos venció y las ubicaciones se liberaron', 'RESERVA_VENCIDA');
+  }
+  if (resultado.tipo === 'iniciada') throw conflicto('La función ya comenzó: la reserva se liberó', 'FUNCION_INICIADA');
+  if (resultado.tipo === 'bloqueado') {
+    throw prohibido('No podés comprar entradas: tu DNI figura en la lista de derecho de admisión. La reserva se liberó.');
   }
   if (resultado.tipo === 'rechazado') {
     throw new HttpError(402, `Pago rechazado: ${resultado.motivo}. Tu reserva sigue vigente, podés reintentar.`, 'PAGO_RECHAZADO');

@@ -14,7 +14,10 @@ type BorradorTarifa = { precio: string; descuento: string; vigenciaHasta: string
 type BorradorPlaya = { habilitada: boolean; precio: string; cupo: string };
 
 const aEntero = (v: string) => Number(v.replace(/\D/g, '')) || 0;
-const fechaInput = (iso: string) => iso.slice(0, 10);
+/** Fecha (AAAA-MM-DD) en hora de Buenos Aires: en UTC, una promo que vence 23:59 caería al día siguiente. */
+const fechaInput = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+/** Tope del backend para un descuento. */
+const DESCUENTO_MAXIMO = 90;
 
 export default function PanelOrganizador() {
   const { id } = useParams();
@@ -75,7 +78,7 @@ function GestionFuncion({ funcionId, panel, recargarPanel }: { funcionId: number
     );
     setPlayas(
       Object.fromEntries(
-        cfg.playas.map((p) => [p.id, { habilitada: !!p.tarifa, precio: p.tarifa ? String(p.tarifa.precio) : '', cupo: p.tarifa ? String(p.tarifa.cupoHabilitado) : String(p.capacidadTotal) }]),
+        cfg.playas.map((p) => [p.id, { habilitada: !!p.tarifa?.habilitada, precio: p.tarifa ? String(p.tarifa.precio) : '', cupo: p.tarifa ? String(p.tarifa.cupoHabilitado) : String(p.capacidadTotal) }]),
       ),
     );
     setExigePatente(cfg.funcion.exigePatente);
@@ -101,7 +104,11 @@ function GestionFuncion({ funcionId, panel, recargarPanel }: { funcionId: number
           return {
             sectorId: s.id,
             precio: aEntero(b?.precio ?? ''),
-            descuento: desc > 0 && b.vigenciaHasta ? { porcentaje: desc, vigenciaHasta: new Date(`${b.vigenciaHasta}T23:59:59-03:00`).toISOString() } : null,
+            // Sin fecha, la promo vale hasta la función (igual que el precio final que se muestra)
+            descuento:
+              desc > 0
+                ? { porcentaje: desc, vigenciaHasta: b.vigenciaHasta ? new Date(`${b.vigenciaHasta}T23:59:59-03:00`).toISOString() : cfg.funcion.fechaHora }
+                : null,
           };
         }),
       });
@@ -372,7 +379,17 @@ function GestionFuncion({ funcionId, panel, recargarPanel }: { funcionId: number
                             </label>
                             <label>
                               <span className="etiqueta">Descuento %</span>
-                              <input className="campo-mono px-2.5 py-1.5 text-label-md text-tertiary" inputMode="numeric" placeholder="0" value={b.descuento} onChange={(e) => actualizar({ descuento: e.target.value.replace(/\D/g, '').slice(0, 2) })} />
+                              <input
+                                className="campo-mono px-2.5 py-1.5 text-label-md text-tertiary"
+                                inputMode="numeric"
+                                placeholder="0"
+                                title={`Máximo ${DESCUENTO_MAXIMO}%`}
+                                value={b.descuento}
+                                onChange={(e) => {
+                                  const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+                                  actualizar({ descuento: v && String(Math.min(DESCUENTO_MAXIMO, Number(v))) });
+                                }}
+                              />
                             </label>
                             <div>
                               <span className="etiqueta">Precio final</span>
@@ -385,6 +402,7 @@ function GestionFuncion({ funcionId, panel, recargarPanel }: { funcionId: number
                                 <Icono nombre={vencido ? 'timer_off' : 'schedule'} className="text-[14px]" />
                                 {vencido ? 'Promo vencida el' : 'Vigencia promo hasta'}
                                 <input type="date" className="campo-mono w-auto px-1.5 py-0.5 text-[11px]" value={b.vigenciaHasta} onChange={(e) => actualizar({ vigenciaHasta: e.target.value })} />
+                                {!b.vigenciaHasta && <span className="text-outline">(vacío: hasta la función)</span>}
                               </label>
                             ) : (
                               <span className="flex items-center gap-1">
@@ -818,11 +836,17 @@ function ModalNuevaFuncion({ abierto, panel, onCerrar, onCreada }: { abierto: bo
   const [enviando, setEnviando] = useState(false);
   const salas = useMemo(() => panel?.salas ?? [], [panel]);
 
+  // Valores iniciales solo al abrir: recargar el panel (p. ej. tras crear el evento) no pisa la selección
+  const preparado = useRef(false);
   useEffect(() => {
-    if (abierto && panel) {
-      setEventoId(panel.eventos[0] ? String(panel.eventos[0].id) : 'nuevo');
-      setSalaId(salas[0] ? String(salas[0].id) : '');
+    if (!abierto) {
+      preparado.current = false;
+      return;
     }
+    if (preparado.current || !panel) return;
+    preparado.current = true;
+    setEventoId(panel.eventos[0] ? String(panel.eventos[0].id) : 'nuevo');
+    setSalaId(salas[0] ? String(salas[0].id) : '');
   }, [abierto, panel, salas]);
 
   const crear = async (e: FormEvent) => {
@@ -830,7 +854,12 @@ function ModalNuevaFuncion({ abierto, panel, onCerrar, onCreada }: { abierto: bo
     setEnviando(true);
     try {
       let id = Number(eventoId);
-      if (eventoId === 'nuevo') id = (await api.post<{ id: number }>('/org/eventos', evento)).id;
+      if (eventoId === 'nuevo') {
+        id = (await api.post<{ id: number }>('/org/eventos', evento)).id;
+        // Si la función falla (sala ocupada, fecha pasada), reintentar usa este evento en vez de crear otro
+        setEventoId(String(id));
+        onCreada();
+      }
       const funcion = await api.post<{ id: number }>('/org/funciones', { eventoId: id, salaId: Number(salaId), fechaHora: desdeInputFechaHora(fecha) });
       toast('Función programada en borrador. Definí precios por sector y publicala.');
       onCerrar();

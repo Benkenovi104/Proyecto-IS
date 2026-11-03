@@ -58,11 +58,15 @@ async function solicitud<T>(metodo: string, ruta: string, body?: unknown): Promi
   }
   if (res.status === 204) return undefined as T;
   const tipo = res.headers.get('content-type') ?? '';
-  const datos = tipo.includes('json') ? await res.json() : await res.text();
+  const esJson = tipo.includes('json');
+  // La API siempre responde sus errores en JSON: un 5xx sin JSON viene de un proxy o gateway
+  // (p. ej. el de Vite con la API apagada), es decir, el servidor no está disponible.
+  if (res.status >= 500 && !esJson) throw new ErrorApi(0, 'No hay conexión con el servidor', 'SIN_CONEXION');
+  const datos = esJson ? await res.json() : await res.text();
   if (!res.ok) {
     if (res.status === 401 && token) eventoSesionVencida.dispatchEvent(new Event('vencida'));
     const err = typeof datos === 'object' && datos ? datos : { error: String(datos) };
-    throw new ErrorApi(res.status, err.error ?? `Error ${res.status}`, err.code, err.details);
+    throw new ErrorApi(res.status, err.error || `Error ${res.status}`, err.code, err.details);
   }
   return datos as T;
 }

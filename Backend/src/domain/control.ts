@@ -1,7 +1,7 @@
 // Validar QR en puerta, playa o barra (actividad 3.5).
 import type { UsuarioAutenticado } from '../auth';
 import { prisma } from '../db';
-import { leerCodigo } from '../lib/codigos';
+import { firmar, leerCodigo } from '../lib/codigos';
 import { noEncontrado } from '../lib/http';
 import { type PuntoControl } from './enums';
 import { enListaNegra } from './ocupacion';
@@ -87,6 +87,16 @@ const rechazoInexistente = (r: ResultadoValidacion) => rechazoRevocado(r, 'El c�
 const rechazoAnulado = (r: ResultadoValidacion) =>
   rechazoRevocado(r, 'Código anulado (la reserva venció o la compra fue reembolsada)', 'ANULADA');
 
+/**
+ * Un código tipeado sin su HASH podría inventarse (son 5 dígitos): no habilita el acceso.
+ * DNI- y PAT- no la necesitan porque el controlador verifica el documento o el vehículo.
+ */
+const rechazoSinFirma = (r: ResultadoValidacion) =>
+  Object.assign(r, {
+    estadoCodigo: 'FIRMA_REQUERIDA',
+    motivo: 'Código tipeado sin el HASH: ingresalo junto con el HASH impreso debajo del QR, o validá por DNI / patente',
+  });
+
 function verificarComun(
   r: ResultadoValidacion,
   datos: { estado: string; compraPagada: boolean; funcionId: number; usadoEn: Date | null },
@@ -108,13 +118,20 @@ function verificarComun(
   return null;
 }
 
-async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, confirmar: boolean, firmaValida: boolean | null) {
+async function evaluar(
+  codigo: string,
+  punto: PuntoControl,
+  funcionId: number,
+  opciones: { confirmar: boolean; firmaValida: boolean | null; exigirFirma: boolean; momento: Date },
+) {
+  const { confirmar, momento } = opciones;
   const r = base(codigo, punto);
-  if (firmaValida === false) {
+  if (opciones.firmaValida === false) {
     r.estadoCodigo = 'FIRMA_INVALIDA';
     r.motivo = 'La firma del QR no es válida: posible código adulterado';
     return r;
   }
+  const faltaFirma = opciones.exigirFirma && opciones.firmaValida === null;
 
   // ── Entradas (por código o por DNI del titular) ──
   if (codigo.startsWith('ENT-') || codigo.startsWith('DNI-')) {
@@ -152,8 +169,9 @@ async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, c
     if (await enListaNegra(prisma, entrada.titular.dni)) {
       return Object.assign(r, { motivo: 'El titular figura en la lista negra (derecho de admisión)', estadoCodigo: 'LISTA_NEGRA' });
     }
+    if (faltaFirma && codigo.startsWith('ENT-')) return rechazoSinFirma(r);
     if (confirmar) {
-      const usadaEn = new Date();
+      const usadaEn = momento;
       const { count } = await prisma.entrada.updateMany({ where: { id: entrada.id, estado: 'VIGENTE' }, data: { estado: 'USADA', usadaEn } });
       if (!count) return Object.assign(r, { motivo: 'Este QR acaba de usarse en otro acceso', estadoCodigo: 'USADA' });
       Object.assign(r, { confirmado: true, estadoCodigo: 'USADA', usadoEn: usadaEn });
@@ -183,7 +201,7 @@ async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, c
       if (!pase) return rechazoInexistente(r);
     }
     r.titular = { nombre: pase.compra.comprador.nombre, dni: pase.compra.comprador.dni };
-    r.patente = formatearPatente(pase.patente);
+    r.patente = pase.patente ? formatearPatente(pase.patente) : null;
     r.playa = pase.tarifa.playa.nombre;
     if (pase.estado === 'ANULADA') return rechazoAnulado(Object.assign(r, { tipo: 'PASE' as const }));
     const error = verificarComun(
@@ -193,8 +211,9 @@ async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, c
       { id: funcionId, nombre: pase.tarifa.funcion.evento.nombre },
     );
     if (error) return Object.assign(r, { motivo: error });
+    if (faltaFirma && codigo.startsWith('PRK-')) return rechazoSinFirma(r);
     if (confirmar) {
-      const usadoEn = new Date();
+      const usadoEn = momento;
       const { count } = await prisma.paseEstacionamiento.updateMany({ where: { id: pase.id, estado: 'VIGENTE' }, data: { estado: 'USADA', usadoEn } });
       if (!count) return Object.assign(r, { motivo: 'Este pase acaba de usarse en otro acceso', estadoCodigo: 'USADA' });
       Object.assign(r, { confirmado: true, estadoCodigo: 'USADA', usadoEn });
@@ -220,8 +239,9 @@ async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, c
       { id: funcionId, nombre: voucher.compra.funcion.evento.nombre },
     );
     if (error) return Object.assign(r, { motivo: error });
+    if (faltaFirma) return rechazoSinFirma(r);
     if (confirmar) {
-      const canjeadoEn = new Date();
+      const canjeadoEn = momento;
       // VoucherConsumicion.canjear(): el canje es independiente de validar la entrada al show
       const { count } = await prisma.voucherConsumicion.updateMany({ where: { id: voucher.id, estado: 'VIGENTE' }, data: { estado: 'USADA', canjeadoEn } });
       if (!count) return Object.assign(r, { motivo: 'Este voucher acaba de canjearse en otra barra', estadoCodigo: 'USADA' });
@@ -241,11 +261,29 @@ async function evaluar(codigo: string, punto: PuntoControl, funcionId: number, c
  */
 export async function validarCodigo(
   controlador: UsuarioAutenticado,
-  datos: { codigo: string; punto: PuntoControl; funcionId: number; confirmar: boolean; offline?: boolean; fechaHora?: Date },
+  datos: {
+    codigo: string;
+    punto: PuntoControl;
+    funcionId: number;
+    confirmar: boolean;
+    offline?: boolean;
+    /** Momento real del ingreso (conciliación offline); nunca posterior a ahora. */
+    fechaHora?: Date;
+    /** La conciliación registra ingresos que la terminal ya aprobó sin conexión: no se exige el HASH. */
+    exigirFirma?: boolean;
+  },
 ) {
   const inicio = performance.now();
+  await existeFuncion(datos.funcionId);
+  const ahora = new Date();
+  const momento = datos.fechaHora && datos.fechaHora < ahora ? datos.fechaHora : ahora;
   const { codigo, firmaValida } = leerCodigo(datos.codigo);
-  const r = await evaluar(codigo, datos.punto, datos.funcionId, datos.confirmar, firmaValida);
+  const r = await evaluar(codigo, datos.punto, datos.funcionId, {
+    confirmar: datos.confirmar,
+    firmaValida,
+    exigirFirma: datos.exigirFirma ?? true,
+    momento,
+  });
   r.latenciaMs = Math.max(1, Math.round(performance.now() - inicio));
   r.offline = !!datos.offline;
 
@@ -264,17 +302,21 @@ export async function validarCodigo(
         ubicacion: r.ubicacion ?? r.playa ?? (r.items.length ? r.items.map((i) => `${i.cantidad}x ${i.nombre}`).join(', ') : null),
         latenciaMs: r.latenciaMs,
         offline: r.offline,
-        fechaHora: datos.fechaHora ?? new Date(),
+        fechaHora: momento,
       },
     });
   }
   return r;
 }
 
+async function existeFuncion(funcionId: number) {
+  if (!(await prisma.funcion.findUnique({ where: { id: funcionId }, select: { id: true } }))) throw noEncontrado('La función no existe');
+}
+
 export async function resumenControl(controladorId: number, funcionId: number) {
   const funcion = await prisma.funcion.findUnique({
     where: { id: funcionId },
-    include: { evento: true, sala: true, tarifasEstacionamiento: { include: { playa: true } } },
+    include: { evento: true, sala: true, tarifasEstacionamiento: { where: { habilitada: true }, include: { playa: true } } },
   });
   if (!funcion) throw noEncontrado('La función no existe');
 
@@ -322,8 +364,18 @@ export async function resumenControl(controladorId: number, funcionId: number) {
   };
 }
 
-/** Sincronizar padrón para modo sin conexión: todos los códigos de la función y su estado. */
+/** Bitácora completa de la función (para exportar; el resumen solo trae las últimas lecturas). */
+export async function bitacoraFuncion(funcionId: number) {
+  await existeFuncion(funcionId);
+  return prisma.validacionAcceso.findMany({ where: { funcionId }, orderBy: { fechaHora: 'desc' } });
+}
+
+/**
+ * Sincronizar padrón para modo sin conexión: todos los códigos de la función y su estado,
+ * con su firma (para verificar QR y HASH sin el secreto) y los DNI vedados por derecho de admisión.
+ */
 export async function padronFuncion(funcionId: number) {
+  await existeFuncion(funcionId);
   const [entradas, pases, vouchers] = await Promise.all([
     prisma.entrada.findMany({
       where: { funcionId, compra: { estado: 'PAGADA' }, codigoQR: { not: null } },
@@ -348,12 +400,15 @@ export async function padronFuncion(funcionId: number) {
       ],
     },
   });
+  const dnis = [...new Set(entradas.flatMap((e) => (e.titular.dni ? [e.titular.dni] : [])))];
+  const vedados = await prisma.registroListaNegra.findMany({ where: { dni: { in: dnis } }, select: { dni: true } });
   return {
     funcionId,
     generadoEn: new Date(),
     codigos: [
       ...entradas.map((e) => ({
         codigo: e.codigoQR!,
+        firma: firmar(e.codigoQR!),
         tipo: 'ENTRADA' as const,
         estado: e.estado,
         titular: e.titular.nombre,
@@ -362,15 +417,17 @@ export async function padronFuncion(funcionId: number) {
       })),
       ...pases.map((p) => ({
         codigo: p.codigoQR!,
+        firma: firmar(p.codigoQR!),
         tipo: 'PASE' as const,
         estado: p.estado,
         titular: p.compra.comprador.nombre,
         dni: null,
         patente: p.patente,
-        detalle: `${formatearPatente(p.patente)} · ${p.tarifa.playa.nombre}`,
+        detalle: `${p.patente ? formatearPatente(p.patente) : 'Sin patente'} · ${p.tarifa.playa.nombre}`,
       })),
       ...vouchers.map((v) => ({
         codigo: v.codigoQR!,
+        firma: firmar(v.codigoQR!),
         tipo: 'VOUCHER' as const,
         estado: v.estado,
         titular: v.compra.comprador.nombre,
@@ -379,5 +436,6 @@ export async function padronFuncion(funcionId: number) {
       })),
     ],
     revocados: revocados.map((r) => ({ codigo: r.codigo, tipo: r.tipo, motivo: r.motivo, fecha: r.fecha })),
+    listaNegra: vedados.map((v) => v.dni),
   };
 }

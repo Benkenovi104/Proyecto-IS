@@ -1,12 +1,11 @@
 // Gestionar lista negra (derecho de admisión).
 import { type FormEvent, useState } from 'react';
-import { Cabecera } from '../../components/Cabecera';
 import { useToast } from '../../components/Toast';
 import { Aviso, Boton, Campo, Cargando, Chip, Icono, Vacio } from '../../components/ui';
 import { api, mensajeError } from '../../lib/api';
 import { dni, fechaCorta } from '../../lib/formato';
 import { useCarga } from '../../lib/useCarga';
-import { NavAdmin } from './NavAdmin';
+import { LayoutAdmin } from './NavAdmin';
 
 interface Registro {
   id: number;
@@ -49,8 +48,7 @@ export default function ListaNegra() {
   const visibles = datos?.filter((r) => `${r.dni} ${r.nombre ?? ''} ${r.motivo}`.toLowerCase().includes(filtro.toLowerCase()));
 
   return (
-    <>
-      <Cabecera subbarra={<NavAdmin />} />
+    <LayoutAdmin>
       <main className="mx-auto grid w-full max-w-7xl gap-6 p-4 lg:grid-cols-3 lg:p-8">
         <form onSubmit={agregar} className="h-fit space-y-3 rounded-lg border border-nv-line bg-nv-card p-5">
           <h1 className="flex items-center gap-2 text-headline-md text-white">
@@ -115,6 +113,6 @@ export default function ListaNegra() {
           )}
         </section>
       </main>
-    </>
+    </LayoutAdmin>
   );
 }

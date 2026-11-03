@@ -5,7 +5,10 @@ import { noEncontrado } from '../lib/http';
 export async function metricasFuncion(funcionId: number) {
   const funcion = await prisma.funcion.findUnique({
     where: { id: funcionId },
-    include: { sala: { include: { sectores: { orderBy: { id: 'asc' } } } }, tarifasEstacionamiento: { include: { playa: true } } },
+    include: {
+      sala: { include: { sectores: { orderBy: { id: 'asc' } } } },
+      tarifasEstacionamiento: { where: { habilitada: true }, include: { playa: true } },
+    },
   });
   if (!funcion) throw noEncontrado('La función no existe');
 
@@ -75,7 +78,7 @@ export async function metricasFuncion(funcionId: number) {
       ingresados: pases.filter((p) => p.estado === 'USADA').length,
       cupo: cupoEstacionamiento,
       libres: Math.max(0, cupoEstacionamiento - pases.length),
-      patentesRegistradas: new Set(pases.map((p) => p.patente)).size,
+      patentesRegistradas: new Set(pases.flatMap((p) => (p.patente ? [p.patente] : []))).size,
       porPlaya: funcion.tarifasEstacionamiento.map((t) => ({
         playa: t.playa.nombre,
         vendidos: pases.filter((p) => p.tarifaId === t.id).length,

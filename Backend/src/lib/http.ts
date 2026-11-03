@@ -42,6 +42,14 @@ export const manejarErrores: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(409).json({ error: 'Ya existe un registro con esos datos', code: 'DUPLICADO', details: err.meta });
     return;
   }
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+    res.status(404).json({ error: 'El registro no existe', code: 'NO_ENCONTRADO' });
+    return;
+  }
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+    res.status(409).json({ error: 'La operación afecta registros relacionados o referencia uno inexistente', code: 'RELACION_INVALIDA' });
+    return;
+  }
   if (err?.type === 'entity.parse.failed') {
     res.status(400).json({ error: 'JSON inválido', code: 'JSON_INVALIDO' });
     return;

@@ -180,11 +180,13 @@ model Descuento {
 }
 
 model TarifaEstacionamiento {
-  id             Int @id @default(autoincrement())
+  id             Int     @id @default(autoincrement())
   funcionId      Int
   playaId        Int
   precio         Int
   cupoHabilitado Int
+  // Deshabilitar la playa para la función no borra la tarifa: sus pases (aun anulados) son historial
+  habilitada     Boolean @default(true)
 
   funcion Funcion               @relation(fields: [funcionId], references: [id], onDelete: Cascade)
   playa   PlayaEstacionamiento  @relation(fields: [playaId], references: [id], onDelete: Cascade)
@@ -254,7 +256,7 @@ model PaseEstacionamiento {
   id       Int       @id @default(autoincrement())
   compraId Int
   tarifaId Int
-  patente  String
+  patente  String? // null cuando la función no exige patente (Funcion.exigePatente)
   codigoQR String?   @unique
   precio   Int
   estado   String    @default("VIGENTE")

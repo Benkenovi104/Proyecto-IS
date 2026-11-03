@@ -1,6 +1,7 @@
 // Mapa vectorial (SVG) de la sala: escenario, sectores y butacas.
 // Lo usan el editor del administrador (modo "edicion") y el portal del comprador (modo "compra").
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import { letraFila } from '../lib/formato';
 import type { Geometria } from '../lib/tipos';
 
 export const PALETA: Record<string, { relleno: string; borde: string; texto: string; butaca: string; clase: string }> = {
@@ -40,7 +41,7 @@ function butacasDe(s: SectorDibujo) {
   const lista = [];
   for (let f = 0; f < s.filas; f++) {
     for (let n = 1; n <= s.butacasPorFila; n++) {
-      lista.push({ id: -(f * 1000 + n), fila: String.fromCharCode(65 + (f % 26)), numero: n, posX: (n - 0.5) / s.butacasPorFila, posY: (f + 0.5) / s.filas, ocupada: false });
+      lista.push({ id: -(f * 1000 + n), fila: letraFila(f), numero: n, posX: (n - 0.5) / s.butacasPorFila, posY: (f + 0.5) / s.filas, ocupada: false });
     }
   }
   return lista;

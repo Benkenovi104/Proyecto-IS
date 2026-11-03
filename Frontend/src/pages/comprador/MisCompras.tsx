@@ -24,12 +24,17 @@ export default function MisCompras() {
   const { hash } = useLocation();
   const { datos, setDatos, error, cargando, recargar } = useCarga(() => api.get<DatosMisCompras>('/compras/mias'), [usuario?.id]);
   const [accion, setAccion] = useState<{ tipo: 'transferir' | 'reembolso'; compraId: number; entradaId?: number } | null>(null);
+  const [transfiriendoRecibida, setTransfiriendoRecibida] = useState<number | null>(null);
+  const [respondiendo, setRespondiendo] = useState<number | null>(null);
 
   useEffect(() => {
     if (datos && hash) document.querySelector(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [datos, hash]);
 
   const responder = async (transferenciaId: number, respuesta: 'aceptar' | 'rechazar' | 'cancelar') => {
+    // Una respuesta por vez: un doble clic no manda la misma operación dos veces
+    if (respondiendo !== null) return;
+    setRespondiendo(transferenciaId);
     try {
       setDatos(await api.post<DatosMisCompras>(`/transferencias/${transferenciaId}/${respuesta}`));
       toast(
@@ -42,8 +47,11 @@ export default function MisCompras() {
     } catch (e) {
       toast(mensajeError(e), 'error');
       recargar();
+    } finally {
+      setRespondiendo(null);
     }
   };
+  const recibidaATransferir = datos?.entradasRecibidas.find((e) => e.id === transfiriendoRecibida);
 
   return (
     <>
@@ -70,10 +78,10 @@ export default function MisCompras() {
                   <p className="mt-1 text-[11px] text-outline">Al aceptar se anula el QR de quien te la envía y se emite uno nuevo a tu nombre.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Boton variante="fantasma" icono="close" onClick={() => responder(t.id, 'rechazar')}>
+                  <Boton variante="fantasma" icono="close" disabled={respondiendo !== null} onClick={() => responder(t.id, 'rechazar')}>
                     Rechazar
                   </Boton>
-                  <Boton variante="primario" icono="check" onClick={() => responder(t.id, 'aceptar')}>
+                  <Boton variante="primario" icono="check" cargando={respondiendo === t.id} disabled={respondiendo !== null} onClick={() => responder(t.id, 'aceptar')}>
                     Aceptar entrada
                   </Boton>
                 </div>
@@ -97,6 +105,7 @@ export default function MisCompras() {
             onAccion={setAccion}
             onActualizar={(c) => setDatos((d) => (d ? { ...d, compras: d.compras.map((x) => (x.id === c.id ? c : x)) } : d))}
             onCancelarTransferencia={(id) => responder(id, 'cancelar')}
+            respondiendo={respondiendo !== null}
             onRecargar={recargar}
           />
         ))}
@@ -112,9 +121,24 @@ export default function MisCompras() {
                   key={e.id}
                   entrada={e}
                   subtitulo={`${e.funcion.evento.nombre} · ${fechaCorta(e.funcion.fechaHora)} ${hora(e.funcion.fechaHora)} hs · cedida por ${e.cedidaPor.nombre}`}
+                  // Se puede volver a transferir; el reembolso le corresponde a quien la compró
+                  transferible={Date.now() < new Date(e.funcion.fechaHora).getTime()}
+                  onTransferir={() => setTransfiriendoRecibida(e.id)}
+                  onCancelarTransferencia={(id) => responder(id, 'cancelar')}
+                  respondiendo={respondiendo !== null}
                 />
               ))}
             </div>
+            {recibidaATransferir && (
+              <PanelTransferencia
+                entrada={recibidaATransferir}
+                onCerrar={() => setTransfiriendoRecibida(null)}
+                onListo={() => {
+                  setTransfiriendoRecibida(null);
+                  recargar();
+                }}
+              />
+            )}
           </section>
         )}
 
@@ -131,6 +155,7 @@ function CompraDetallada({
   onAccion,
   onActualizar,
   onCancelarTransferencia,
+  respondiendo,
   onRecargar,
 }: {
   compra: Compra;
@@ -139,6 +164,7 @@ function CompraDetallada({
   onAccion: (a: { tipo: 'transferir' | 'reembolso'; compraId: number; entradaId?: number } | null) => void;
   onActualizar: (c: Compra) => void;
   onCancelarTransferencia: (id: number) => void;
+  respondiendo: boolean;
   onRecargar: () => void;
 }) {
   const [abierta, setAbierta] = useState(abiertaInicial);
@@ -230,6 +256,7 @@ function CompraDetallada({
                   onTransferir={() => onAccion({ tipo: 'transferir', compraId: compra.id, entradaId: e.id })}
                   onReembolso={() => onAccion({ tipo: 'reembolso', compraId: compra.id, entradaId: e.id })}
                   onCancelarTransferencia={onCancelarTransferencia}
+                  respondiendo={respondiendo}
                 />
               ))}
             {compra.pases.filter((p) => p.estado !== 'ANULADA' || compra.estado === 'REEMBOLSADA').map((p) => (
@@ -301,14 +328,17 @@ function TarjetaEntrada({
   onTransferir,
   onReembolso,
   onCancelarTransferencia,
+  respondiendo,
 }: {
   entrada: Entrada;
   subtitulo?: string;
   enPlazo?: boolean;
   transferible?: boolean;
   onTransferir?: () => void;
+  /** Sin esta acción (entradas recibidas) no se ofrece el reembolso. */
   onReembolso?: () => void;
   onCancelarTransferencia?: (id: number) => void;
+  respondiendo?: boolean;
 }) {
   const cedida = !e.esTitular && e.estado !== 'ANULADA';
   const estado =
@@ -372,7 +402,13 @@ function TarjetaEntrada({
               <Aviso tono="alerta" icono="schedule_send">
                 Esperando que <strong>{e.transferenciaPendiente.destinatario.nombre}</strong> acepte la entrada. Hasta entonces tu QR sigue vigente.
               </Aviso>
-              <Boton variante="fantasma" icono="cancel_schedule_send" className="w-full" onClick={() => onCancelarTransferencia?.(e.transferenciaPendiente!.id)}>
+              <Boton
+                variante="fantasma"
+                icono="cancel_schedule_send"
+                className="w-full"
+                disabled={respondiendo}
+                onClick={() => onCancelarTransferencia?.(e.transferenciaPendiente!.id)}
+              >
                 Cancelar transferencia
               </Boton>
             </>
@@ -381,14 +417,16 @@ function TarjetaEntrada({
               <Boton variante="primario" icono="send" className="w-full" disabled={!transferible} onClick={onTransferir}>
                 Transferir Entrada
               </Boton>
-              <div className="flex items-center justify-between gap-2">
-                <Boton variante="peligro" icono="undo" className="flex-1" disabled={!enPlazo} onClick={onReembolso}>
-                  Solicitar Reembolso
-                </Boton>
-                <Chip tono={enPlazo ? 'exito' : 'peligro'} icono={enPlazo ? 'check' : 'block'}>
-                  {enPlazo ? '>48 hs para la función' : 'Plazo vencido'}
-                </Chip>
-              </div>
+              {onReembolso && (
+                <div className="flex items-center justify-between gap-2">
+                  <Boton variante="peligro" icono="undo" className="flex-1" disabled={!enPlazo} onClick={onReembolso}>
+                    Solicitar Reembolso
+                  </Boton>
+                  <Chip tono={enPlazo ? 'exito' : 'peligro'} icono={enPlazo ? 'check' : 'block'}>
+                    {enPlazo ? '>48 hs para la función' : 'Plazo vencido'}
+                  </Chip>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -420,7 +458,7 @@ function TarjetaPase({ pase: p, apertura }: { pase: Pase; apertura: string | nul
             <span className="text-right font-bold text-white">{p.playa.nombre}</span>
           </FilaDato>
           <FilaDato etiqueta="Vehículo registrado:">
-            <PatenteMercosur patente={p.patente} />
+            {p.patente ? <PatenteMercosur patente={p.patente} /> : <span className="text-on-surface-variant">Sin patente (valida por QR)</span>}
           </FilaDato>
           {apertura && (
             <FilaDato etiqueta="Horario y acceso:">
@@ -432,7 +470,7 @@ function TarjetaPase({ pase: p, apertura }: { pase: Pase; apertura: string | nul
       <div className="border-t border-nv-line pt-3">
         <div className="flex items-center gap-2 rounded-lg border border-secondary/20 bg-secondary/10 p-2.5 text-[11px] text-secondary-fixed">
           <Icono nombre="verified_user" className="text-[18px] text-secondary" />
-          Escaneá el QR en el lector de la barrera vehicular. También se valida por patente.
+          Escaneá el QR en el lector de la barrera vehicular.{p.patente && ' También se valida por patente.'}
         </div>
       </div>
     </div>
@@ -453,6 +491,7 @@ function TarjetaVoucher({ voucher: v }: { voucher: Voucher }) {
               <div className="flex items-center justify-center gap-1.5 rounded border border-amber-500/30 bg-amber-950/60 px-2 py-1 font-mono text-label-md text-amber-400">
                 <Icono nombre="restaurant" className="text-[16px]" /> VOUCHER: #{v.codigo}
               </div>
+              {v.hash && <div className="font-mono text-[10px] tracking-tight text-outline">HASH: {v.hash}</div>}
               <div className="font-mono text-[10px] tracking-tight text-outline">PIN DE SEGURIDAD: {v.pin}</div>
             </div>
           )}

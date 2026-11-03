@@ -544,7 +544,8 @@ async function main() {
     const tipo = azar();
     if (tipo < 0.55) {
       const precio = fecha < enDias(-13, '23:59') ? 23800 : 28000;
-      for (let k = 0; k < entre(1, 4); k++) entradas.push({ sectorId: S['SEC-CMP-01'].id, precio });
+      const cantidad = entre(1, 4);
+      for (let k = 0; k < cantidad; k++) entradas.push({ sectorId: S['SEC-CMP-01'].id, precio });
     } else if (tipo < 0.8) {
       for (const b of ocupar(S['SEC-PAT-01'].butacas, entre(1, 4))) entradas.push({ sectorId: S['SEC-PAT-01'].id, butaca: b, precio: 34000 });
     } else {

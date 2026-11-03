@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { autenticar, requiereRol, usuarioDe } from '../auth';
 import { prisma } from '../db';
-import { padronFuncion, resumenControl, validarCodigo } from '../domain/control';
+import { bitacoraFuncion, padronFuncion, resumenControl, validarCodigo } from '../domain/control';
 import { PuntoControl } from '../domain/enums';
 import { idParam, validar } from '../lib/http';
 
@@ -40,6 +40,11 @@ controlRouter.post('/validaciones', async (req, res) => {
   res.json(await validarCodigo(usuarioDe(req), validar(esquemaValidacion, req.body)));
 });
 
+/** Bitácora completa de validaciones de la función (exportación). */
+controlRouter.get('/funciones/:id/bitacora', async (req, res) => {
+  res.json(await bitacoraFuncion(idParam(req.params.id)));
+});
+
 /** Sincronizar padrón para modo sin conexión. */
 controlRouter.get('/funciones/:id/padron', async (req, res) => {
   res.json(await padronFuncion(idParam(req.params.id)));
@@ -58,7 +63,15 @@ controlRouter.post('/sincronizar', async (req, res) => {
   const resultados = [];
   for (const op of operaciones) {
     resultados.push(
-      await validarCodigo(usuarioDe(req), { codigo: op.codigo, punto: op.punto, funcionId, confirmar: true, offline: true, fechaHora: op.fechaHora }),
+      await validarCodigo(usuarioDe(req), {
+        codigo: op.codigo,
+        punto: op.punto,
+        funcionId,
+        confirmar: true,
+        offline: true,
+        fechaHora: op.fechaHora,
+        exigirFirma: false,
+      }),
     );
   }
   res.json({

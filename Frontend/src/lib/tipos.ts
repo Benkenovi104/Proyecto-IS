@@ -121,7 +121,8 @@ export interface Entrada {
 
 export interface Pase {
   id: number;
-  patente: string;
+  /** null si la función no exige patente */
+  patente: string | null;
   precio: number;
   estado: EstadoEntrada;
   usadoEn: string | null;
@@ -139,6 +140,7 @@ export interface Voucher {
   canjeadoEn: string | null;
   codigo: string | null;
   qr: string | null;
+  hash: string | null;
   items: { productoId: number; nombre: string; cantidad: number; precioUnitario: number }[];
 }
 
@@ -262,7 +264,7 @@ export interface ConfigFuncion {
     capacidadTotal: number;
     usoExclusivo: boolean;
     habilitadaEnSala: boolean;
-    tarifa: { id: number; precio: number; cupoHabilitado: number; reservados: number } | null;
+    tarifa: { id: number; precio: number; cupoHabilitado: number; habilitada: boolean; reservados: number } | null;
   }[];
   productos: {
     id: number;
@@ -349,6 +351,8 @@ export interface ResultadoValidacion {
   usadoEn: string | null;
   latenciaMs: number;
   offline: boolean;
+  /** Solo en el cliente: lo que se leyó o tipeó (QR firmado, código + HASH, DNI-, PAT-), para confirmar con lo mismo. */
+  lectura?: string;
 }
 
 export interface RegistroValidacion {
@@ -378,6 +382,18 @@ export interface ResumenControl {
 export interface Padron {
   funcionId: number;
   generadoEn: string;
-  codigos: { codigo: string; tipo: 'ENTRADA' | 'PASE' | 'VOUCHER'; estado: EstadoEntrada; titular: string; dni: string | null; patente?: string; detalle: string }[];
+  codigos: {
+    codigo: string;
+    /** Firma HMAC del código (lo que muestra el HASH): permite verificar QR y HASH sin conexión. */
+    firma?: string;
+    tipo: 'ENTRADA' | 'PASE' | 'VOUCHER';
+    estado: EstadoEntrada;
+    titular: string;
+    dni: string | null;
+    patente?: string | null;
+    detalle: string;
+  }[];
   revocados: { codigo: string; tipo: string; motivo: string; fecha: string }[];
+  /** DNI de titulares en la lista negra (los padrones sincronizados antes de este campo no lo traen). */
+  listaNegra?: string[];
 }

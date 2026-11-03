@@ -32,6 +32,9 @@ export function limiteReembolso(fechaFuncion: Date) {
   return new Date(fechaFuncion.getTime() - HORAS_LIMITE_REEMBOLSO * 3600_000);
 }
 
+/** Orden natural de filas (A…Z, AA, AB…): como texto, "AA" quedaría antes que "B". */
+export const compararFilas = (a: string, b: string) => a.length - b.length || a.localeCompare(b);
+
 /** Letras de fila: A..Z, AA, AB, ... */
 export function letraFila(indice: number): string {
   let n = indice;

@@ -53,7 +53,8 @@ compradorRouter.delete('/compras/:id', async (req, res) => {
 });
 
 const esquemaAdicionales = z.object({
-  estacionamiento: z.array(z.object({ tarifaId: z.number().int().positive(), patente: z.string().min(1) })).max(6).default([]),
+  // Sin patente solo si la función no la exige (se verifica en actualizarAdicionales)
+  estacionamiento: z.array(z.object({ tarifaId: z.number().int().positive(), patente: z.string().trim().nullish() })).max(6).default([]),
   consumiciones: z.array(z.object({ productoId: z.number().int().positive(), cantidad: z.number().int().min(0).max(20) })).default([]),
 });
 

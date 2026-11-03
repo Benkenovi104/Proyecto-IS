@@ -2,15 +2,14 @@
 // Dibujar escenario y definir sectores, cargar mapa de butacas y gestionar playas de estacionamiento.
 import { type FormEvent, type PointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { Cabecera } from '../../components/Cabecera';
 import { COLORES, MapaSala, PALETA, type SectorDibujo } from '../../components/MapaSala';
 import { useToast } from '../../components/Toast';
 import { Aviso, Boton, Campo, Cargando, cx, Icono, Modal } from '../../components/ui';
 import { api, mensajeError } from '../../lib/api';
-import { numero } from '../../lib/formato';
+import { letraFila, numero } from '../../lib/formato';
 import type { Geometria, Playa, SalaDetalle, SalaListado } from '../../lib/tipos';
 import { useCarga } from '../../lib/useCarga';
-import { NavAdmin } from './NavAdmin';
+import { LayoutAdmin } from './NavAdmin';
 
 interface SectorEdit extends SectorDibujo {
   id: number | string; // string = sector nuevo todavía no guardado
@@ -56,7 +55,7 @@ export default function EditorSala() {
   const { id } = useParams();
   const { datos: salas, recargar: recargarSalas } = useCarga(() => api.get<SalaListado[]>('/admin/salas'), []);
   if (!id) {
-    if (!salas) return (<><Cabecera /><Cargando /></>);
+    if (!salas) return (<LayoutAdmin><Cargando /></LayoutAdmin>);
     return salas[0] ? <Navigate to={`/admin/salas/${salas[0].id}`} replace /> : <EditorVacio onCreada={recargarSalas} />;
   }
   return <Editor salaId={Number(id)} salas={salas ?? []} recargarSalas={recargarSalas} />;
@@ -65,15 +64,14 @@ export default function EditorSala() {
 function EditorVacio({ onCreada }: { onCreada: () => void }) {
   const [abierto, setAbierto] = useState(true);
   return (
-    <>
-      <Cabecera subbarra={<NavAdmin />} />
+    <LayoutAdmin>
       <main className="mx-auto max-w-xl p-8">
         <Boton variante="primario" icono="add" onClick={() => setAbierto(true)}>
           Crear la primera sala
         </Boton>
       </main>
       <ModalNuevaSala abierto={abierto} onCerrar={() => setAbierto(false)} onCreada={onCreada} />
-    </>
+    </LayoutAdmin>
   );
 }
 
@@ -126,8 +124,12 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
   useEffect(() => {
     const atajos = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key === 'z') (e.preventDefault(), deshacer());
-      if (e.key === 'y') (e.preventDefault(), rehacer());
+      // En un campo de texto, Ctrl+Z deshace lo tipeado (comportamiento nativo), no el mapa
+      const destino = e.target as HTMLElement | null;
+      if (destino?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const tecla = e.key.toLowerCase();
+      if (tecla === 'y' || (tecla === 'z' && e.shiftKey)) (e.preventDefault(), rehacer());
+      else if (tecla === 'z') (e.preventDefault(), deshacer());
     };
     window.addEventListener('keydown', atajos);
     return () => window.removeEventListener('keydown', atajos);
@@ -286,8 +288,8 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
     }
   };
 
-  if (error) return (<><Cabecera subbarra={<NavAdmin />} /><main className="p-8"><Aviso tono="peligro">{error}</Aviso></main></>);
-  if (!sala || !visible) return (<><Cabecera subbarra={<NavAdmin />} /><Cargando texto="Cargando sala…" /></>);
+  if (error) return (<LayoutAdmin><main className="p-8"><Aviso tono="peligro">{error}</Aviso></main></LayoutAdmin>);
+  if (!sala || !visible) return (<LayoutAdmin><Cargando texto="Cargando sala…" /></LayoutAdmin>);
 
   const sector = typeof seleccion === 'number' || (typeof seleccion === 'string' && seleccion !== 'escenario') ? visible.sectores.find((s) => s.id === seleccion) : undefined;
   const bloqueado = !!sector?.entradasEmitidas;
@@ -299,65 +301,63 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
   );
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Cabecera
-        subbarra={
-          <>
-            <div className="flex flex-wrap items-center gap-3 text-body-sm">
-              <NavAdmin />
-              <select
-                aria-label="Sala"
-                className="campo w-auto py-1 text-label-md"
-                value={salaId}
-                onChange={(e) => {
-                  if (sinGuardar && !confirm('Hay cambios sin guardar. ¿Cambiar de sala igualmente?')) return;
-                  navegar(`/admin/salas/${e.target.value}`);
-                }}
-              >
-                {salas.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nombre} ({s.direccion})
-                  </option>
-                ))}
-              </select>
-              <Boton className="py-1" icono="add" onClick={() => setNuevaSala(true)}>
-                Nueva sala
-              </Boton>
-            </div>
-            <div className="flex items-center gap-1 rounded-lg border border-nv-line bg-surface-container-lowest p-1">
-              {herramienta('arrow_selector_tool', 'Selección (mover y redimensionar)', () => {}, true)}
-              {herramienta('rectangle', 'Crear sector rectangular', () => nuevoSector('RECT'))}
-              {herramienta('pentagon', 'Crear sector trapecial', () => nuevoSector('TRAPECIO'))}
-              {herramienta('theaters', 'Seleccionar escenario', () => setSeleccion('escenario'), seleccion === 'escenario')}
-              <span className="mx-1 h-4 w-px bg-nv-line" />
-              <button type="button" aria-label="Alejar" className="px-1 font-mono text-on-surface-variant hover:text-white" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)))}>
-                -
-              </button>
-              <span className="w-12 text-center font-mono text-[11px] text-primary">{Math.round(zoom * 100)}%</span>
-              <button type="button" aria-label="Acercar" className="px-1 font-mono text-on-surface-variant hover:text-white" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}>
-                +
-              </button>
-              <span className="mx-1 h-4 w-px bg-nv-line" />
-              <label className="flex cursor-pointer items-center gap-1.5 px-1.5 text-[11px] text-on-surface-variant">
-                <input type="checkbox" className="form-checkbox h-3 w-3 rounded border-nv-line-strong bg-nv-page text-primary-container focus:ring-0" checked={cuadricula} onChange={(e) => setCuadricula(e.target.checked)} />
-                Cuadrícula
-              </label>
-              <span className="mx-1 h-4 w-px bg-nv-line" />
-              {herramienta('undo', 'Deshacer (Ctrl+Z)', deshacer)}
-              {herramienta('redo', 'Rehacer (Ctrl+Y)', rehacer)}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className={cx('flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-label-md', sinGuardar ? 'border-amber-800/40 bg-amber-950/30 text-amber-300' : 'border-emerald-800/40 bg-emerald-950/30 text-emerald-400')}>
-                <span className={cx('h-1.5 w-1.5 rounded-full', sinGuardar ? 'bg-amber-400' : 'bg-emerald-400')} />
-                {sinGuardar ? 'Cambios sin guardar' : 'Mapa guardado'}
-              </span>
-              <Boton variante="primario" icono="save" className="py-1.5" cargando={guardando} disabled={!sinGuardar} onClick={guardarMapa}>
-                Guardar mapa de sala
-              </Boton>
-            </div>
-          </>
-        }
-      />
+    <LayoutAdmin
+      subbarra={
+        <>
+          <div className="flex flex-wrap items-center gap-3 text-body-sm">
+            <select
+              aria-label="Sala"
+              className="campo w-auto py-1 text-label-md"
+              value={salaId}
+              onChange={(e) => {
+                if (sinGuardar && !confirm('Hay cambios sin guardar. ¿Cambiar de sala igualmente?')) return;
+                navegar(`/admin/salas/${e.target.value}`);
+              }}
+            >
+              {salas.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre} ({s.direccion})
+                </option>
+              ))}
+            </select>
+            <Boton className="py-1" icono="add" onClick={() => setNuevaSala(true)}>
+              Nueva sala
+            </Boton>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-nv-line bg-surface-container-lowest p-1">
+            {herramienta('arrow_selector_tool', 'Selección (mover y redimensionar)', () => {}, true)}
+            {herramienta('rectangle', 'Crear sector rectangular', () => nuevoSector('RECT'))}
+            {herramienta('pentagon', 'Crear sector trapecial', () => nuevoSector('TRAPECIO'))}
+            {herramienta('theaters', 'Seleccionar escenario', () => setSeleccion('escenario'), seleccion === 'escenario')}
+            <span className="mx-1 h-4 w-px bg-nv-line" />
+            <button type="button" aria-label="Alejar" className="px-1 font-mono text-on-surface-variant hover:text-white" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)))}>
+              -
+            </button>
+            <span className="w-12 text-center font-mono text-[11px] text-primary">{Math.round(zoom * 100)}%</span>
+            <button type="button" aria-label="Acercar" className="px-1 font-mono text-on-surface-variant hover:text-white" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))}>
+              +
+            </button>
+            <span className="mx-1 h-4 w-px bg-nv-line" />
+            <label className="flex cursor-pointer items-center gap-1.5 px-1.5 text-[11px] text-on-surface-variant">
+              <input type="checkbox" className="form-checkbox h-3 w-3 rounded border-nv-line-strong bg-nv-page text-primary-container focus:ring-0" checked={cuadricula} onChange={(e) => setCuadricula(e.target.checked)} />
+              Cuadrícula
+            </label>
+            <span className="mx-1 h-4 w-px bg-nv-line" />
+            {herramienta('undo', 'Deshacer (Ctrl+Z)', deshacer)}
+            {herramienta('redo', 'Rehacer (Ctrl+Y)', rehacer)}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={cx('flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-label-md', sinGuardar ? 'border-amber-800/40 bg-amber-950/30 text-amber-300' : 'border-emerald-800/40 bg-emerald-950/30 text-emerald-400')}>
+              <span className={cx('h-1.5 w-1.5 rounded-full', sinGuardar ? 'bg-amber-400' : 'bg-emerald-400')} />
+              {sinGuardar ? 'Cambios sin guardar' : 'Mapa guardado'}
+            </span>
+            <Boton variante="primario" icono="save" className="py-1.5" cargando={guardando} disabled={!sinGuardar} onClick={guardarMapa}>
+              Guardar mapa de sala
+            </Boton>
+          </div>
+        </>
+      }
+    >
 
       <main className="flex flex-1 flex-col overflow-hidden xl:flex-row">
         {/* Panel izquierdo: datos de la sala y playas */}
@@ -494,7 +494,7 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
                 <div className="mt-3 space-y-2 border-t border-nv-line pt-2.5">
                   {sector.numerado ? (
                     <div className="grid grid-cols-2 gap-2">
-                      <Campo etiqueta="Cantidad filas" ayuda={`Filas: A…${String.fromCharCode(64 + Math.min(26, sector.filas || 1))}`}>
+                      <Campo etiqueta="Cantidad filas" ayuda={`Filas: A…${letraFila(Math.max(1, sector.filas) - 1)}`}>
                         <input type="number" min={1} max={40} disabled={bloqueado} className="campo-mono py-1" value={sector.filas} onChange={(e) => actualizarSector(sector.id, { filas: Math.max(1, Math.min(40, Number(e.target.value))) })} />
                       </Campo>
                       <Campo etiqueta="Butacas por fila" ayuda={`1 al ${sector.butacasPorFila} por fila`}>
@@ -555,7 +555,7 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
       </footer>
 
       <ModalNuevaSala abierto={nuevaSala} onCerrar={() => setNuevaSala(false)} onCreada={recargarSalas} />
-    </div>
+    </LayoutAdmin>
   );
 }
 
@@ -622,13 +622,16 @@ function Playas({ sala, onActualizada }: { sala: SalaDetalle; onActualizada: (s:
   const [editando, setEditando] = useState<Playa | null>(null);
 
   const refrescar = async () => onActualizada(await api.get<SalaDetalle>(`/admin/salas/${sala.id}`));
+  /** Devuelve si salió bien, para no cerrar el formulario (ni perder lo cargado) ante un error. */
   const ejecutar = async (accion: () => Promise<unknown>, mensaje: string) => {
     try {
       await accion();
       await refrescar();
       toast(mensaje);
+      return true;
     } catch (e) {
       toast(mensajeError(e), 'error');
+      return false;
     }
   };
 
@@ -706,7 +709,7 @@ function Playas({ sala, onActualizada }: { sala: SalaDetalle; onActualizada: (s:
               ejecutar(
                 () => api.patch(`/admin/playas/${editando.id}`, { nombre: editando.nombre, capacidadTotal: editando.capacidadTotal, usoExclusivo: editando.usoExclusivo, habilitada: editando.habilitada }),
                 'Playa actualizada',
-              ).then(() => setEditando(null));
+              ).then((ok) => ok && setEditando(null));
             }}
             className="space-y-3"
           >

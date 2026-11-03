@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
-import { api, eventoSesionVencida, guardarSesion, sesionGuardada } from '../lib/api';
+import { api, ErrorApi, eventoSesionVencida, guardarSesion, sesionGuardada } from '../lib/api';
 import type { Rol, Sesion, Usuario } from '../lib/tipos';
 
 export const RUTA_INICIO: Record<Rol, string> = {
@@ -42,7 +42,11 @@ export function ProveedorAuth({ children }: { children: ReactNode }) {
     api
       .get<Usuario>('/auth/me')
       .then((u) => aplicar({ ...sesion, usuario: u }))
-      .catch(() => aplicar(null))
+      // Solo se cierra la sesión si el servidor la rechaza: sin conexión se conserva
+      // (el controlador puede seguir validando con el padrón local).
+      .catch((e) => {
+        if (e instanceof ErrorApi && (e.status === 401 || e.status === 403)) aplicar(null);
+      })
       .finally(() => setListo(true));
   }, [aplicar]);
 

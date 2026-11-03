@@ -1,6 +1,7 @@
 // Gestionar salas, dibujar escenario y definir sectores, cargar mapa de butacas (Administrador).
 import { prisma, type Tx } from '../db';
 import { conflicto, noEncontrado, solicitudInvalida } from '../lib/http';
+import { COMPRAS_ACTIVAS, ENTRADAS_OCUPAN } from './enums';
 import { letraFila } from './reglas';
 
 export interface SectorMapa {
@@ -42,9 +43,15 @@ export function matrizButacas(sectorId: number, filas: number, butacasPorFila: n
   return butacas;
 }
 
+/**
+ * Entradas emitidas: vendidas (aun reembolsadas, son historial) o en una reserva en curso.
+ * Las de reservas vencidas nunca se vendieron y no bloquean la edición del sector.
+ */
+const entradasEmitidas = { compra: { estado: { not: 'VENCIDA' } } };
+
 export const incluirSalaCompleta = {
   escenarios: { orderBy: { id: 'asc' } },
-  sectores: { include: { _count: { select: { butacas: true, entradas: true } } }, orderBy: { id: 'asc' } },
+  sectores: { include: { _count: { select: { butacas: true, entradas: { where: entradasEmitidas } } } }, orderBy: { id: 'asc' } },
   playas: { orderBy: { id: 'asc' } },
 } as const;
 
@@ -60,7 +67,17 @@ export async function detalleSala(salaId: number) {
 }
 
 async function entradasDelSector(tx: Tx, sectorId: number) {
-  return tx.entrada.count({ where: { sectorId, estado: { not: 'ANULADA' } } });
+  return tx.entrada.count({ where: { sectorId, ...entradasEmitidas } });
+}
+
+/** El cupo es por función: se compara con la función futura que más lugares ocupa en el sector. */
+async function ocupacionMaximaFutura(tx: Tx, sectorId: number) {
+  const porFuncion = await tx.entrada.groupBy({
+    by: ['funcionId'],
+    where: { sectorId, estado: { in: ENTRADAS_OCUPAN }, compra: { estado: { in: COMPRAS_ACTIVAS } }, funcion: { fechaHora: { gt: new Date() } } },
+    _count: { _all: true },
+  });
+  return Math.max(0, ...porFuncion.map((f) => f._count._all));
 }
 
 /** Guarda el mapa completo de la sala en una sola transacción. */
@@ -85,6 +102,8 @@ export async function guardarMapa(salaId: number, mapa: MapaSala) {
       if (await entradasDelSector(tx, existente.id)) {
         throw conflicto(`No se puede eliminar "${existente.nombre}": tiene entradas emitidas`, 'SECTOR_CON_ENTRADAS');
       }
+      // Las entradas de reservas vencidas siguen referenciando el sector: se descartan para poder borrarlo
+      await tx.entrada.deleteMany({ where: { sectorId: existente.id, compra: { estado: 'VENCIDA' } } });
       await tx.sector.delete({ where: { id: existente.id } });
     }
 
@@ -122,8 +141,9 @@ export async function guardarMapa(salaId: number, mapa: MapaSala) {
       if (cambiaMatriz && (await entradasDelSector(tx, actual.id))) {
         throw conflicto(`No se puede regenerar la matriz de "${actual.nombre}": ya tiene entradas emitidas`, 'SECTOR_CON_ENTRADAS');
       }
-      if (!s.numerado && s.cupoMaximo < (await entradasDelSector(tx, actual.id))) {
-        throw conflicto(`El cupo de "${actual.nombre}" no puede ser menor a las entradas ya emitidas`, 'CUPO_INSUFICIENTE');
+      const ocupadas = s.numerado ? 0 : await ocupacionMaximaFutura(tx, actual.id);
+      if (s.cupoMaximo < ocupadas) {
+        throw conflicto(`El cupo de "${actual.nombre}" no puede ser menor a las ${ocupadas} entradas ya emitidas para una de sus funciones`, 'CUPO_INSUFICIENTE');
       }
       await tx.sector.update({ where: { id: actual.id }, data: datos });
       if (cambiaMatriz) {

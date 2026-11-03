@@ -1,14 +1,13 @@
 // Gestionar usuarios del backoffice.
 import { type FormEvent, useState } from 'react';
 import { useAuth } from '../../auth/AuthContext';
-import { Cabecera } from '../../components/Cabecera';
 import { useToast } from '../../components/Toast';
 import { Aviso, Boton, Campo, Cargando, Chip, Icono, Interruptor } from '../../components/ui';
 import { api, mensajeError } from '../../lib/api';
 import { dni, fechaCorta, NOMBRE_ROL } from '../../lib/formato';
 import type { Rol, Usuario } from '../../lib/tipos';
 import { useCarga } from '../../lib/useCarga';
-import { NavAdmin } from './NavAdmin';
+import { LayoutAdmin } from './NavAdmin';
 
 type UsuarioListado = Usuario & { activo: boolean; creadoEn: string };
 const TONO_ROL: Record<Rol, 'primario' | 'info' | 'vivo' | 'neutro'> = { ADMINISTRADOR: 'primario', ORGANIZADOR: 'info', CONTROLADOR: 'vivo', COMPRADOR: 'neutro' };
@@ -45,8 +44,7 @@ export default function Usuarios() {
   const visibles = datos?.filter((u) => !rolFiltro || u.rol === rolFiltro);
 
   return (
-    <>
-      <Cabecera subbarra={<NavAdmin />} />
+    <LayoutAdmin>
       <main className="mx-auto grid w-full max-w-7xl gap-6 p-4 lg:grid-cols-3 lg:p-8">
         <form onSubmit={crear} className="h-fit space-y-3 rounded-lg border border-nv-line bg-nv-card p-5">
           <h1 className="flex items-center gap-2 text-headline-md text-white">
@@ -133,6 +131,6 @@ export default function Usuarios() {
           )}
         </section>
       </main>
-    </>
+    </LayoutAdmin>
   );
 }

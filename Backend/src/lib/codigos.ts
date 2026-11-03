@@ -29,16 +29,27 @@ export const contenidoQR = (codigo: string) => `TFR1:${codigo}:${firmar(codigo)}
 /** "8f9a11ceb04de921" → "8f9a-11ce-b04d-e921" (como se muestra debajo del QR). */
 export const hashVisible = (codigo: string) => firmar(codigo).match(/.{4}/g)!.join('-');
 
+function firmaCoincide(codigo: string, firma: string) {
+  const esperada = Buffer.from(firmar(codigo));
+  const recibida = Buffer.from(firma.toLowerCase());
+  return esperada.length === recibida.length && crypto.timingSafeEqual(esperada, recibida);
+}
+
+const QR_FIRMADO = /^TFR1:([A-Z0-9-]+):([0-9a-f]{16})$/i;
+/** Código tipeado + HASH impreso debajo del QR: `#ENT-12345-A5 8f9a-11ce-b04d-e921`. */
+const CODIGO_CON_HASH = /^#?([A-Z0-9-]+)\s+([0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4})$/i;
+
 /**
- * Interpreta lo que llega del lector: un QR completo (`TFR1:CODIGO:FIRMA`) o un código
- * tipeado a mano en modo contingencia (`#ENT-12345-A5`, `PAT-AB123CD`, `DNI-38452190`).
+ * Interpreta lo que llega del lector: un QR completo (`TFR1:CODIGO:FIRMA`), un código tipeado
+ * con su HASH, o una consulta sin firma (`#ENT-12345-A5`, `PAT-AB123CD`, `DNI-38452190`).
+ * `firmaValida` es null cuando no vino firma: el control decide si la exige.
  */
 export function leerCodigo(entrada: string): { codigo: string; firmaValida: boolean | null } {
   const limpio = entrada.trim();
-  const qr = /^TFR1:([A-Z0-9-]+):([0-9a-f]{16})$/i.exec(limpio);
-  if (qr) {
-    const codigo = qr[1].toUpperCase();
-    return { codigo, firmaValida: firmar(codigo) === qr[2].toLowerCase() };
+  const firmado = QR_FIRMADO.exec(limpio) ?? CODIGO_CON_HASH.exec(limpio);
+  if (firmado) {
+    const codigo = firmado[1].toUpperCase();
+    return { codigo, firmaValida: firmaCoincide(codigo, firmado[2].replace(/-/g, '')) };
   }
   return { codigo: limpio.toUpperCase().replace(/^#/, '').replace(/\s+/g, ''), firmaValida: null };
 }

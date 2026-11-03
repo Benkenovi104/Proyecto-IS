@@ -170,7 +170,13 @@ organizadorRouter.get('/funciones/:id', async (req, res) => {
           usoExclusivo: p.usoExclusivo,
           habilitadaEnSala: p.habilitada,
           tarifa: tarifa
-            ? { id: tarifa.id, precio: tarifa.precio, cupoHabilitado: tarifa.cupoHabilitado, reservados: await pasesActivos(prisma, tarifa.id) }
+            ? {
+                id: tarifa.id,
+                precio: tarifa.precio,
+                cupoHabilitado: tarifa.cupoHabilitado,
+                habilitada: tarifa.habilitada,
+                reservados: await pasesActivos(prisma, tarifa.id),
+              }
             : null,
         };
       }),
@@ -249,16 +255,23 @@ organizadorRouter.put('/funciones/:id/tarifas', async (req, res) => {
         where: { funcionId_sectorId: { funcionId: funcion.id, sectorId: t.sectorId } },
         create: { funcionId: funcion.id, sectorId: t.sectorId, precio: t.precio },
         update: { precio: t.precio },
+        include: { descuentos: { orderBy: { vigenciaHasta: 'desc' }, take: 1 } },
       });
+      // Volver a guardar no reinicia la promo: se conservan su inicio y su descripción
+      const anterior = tarifa.descuentos[0];
       await tx.descuento.deleteMany({ where: { tarifaId: tarifa.id } });
       if (t.descuento) {
+        const vigenciaDesde = t.descuento.vigenciaDesde ?? anterior?.vigenciaDesde ?? new Date();
+        if (t.descuento.vigenciaHasta <= vigenciaDesde) {
+          throw solicitudInvalida('La vigencia del descuento tiene que terminar después de su inicio', 'VIGENCIA_INVALIDA');
+        }
         await tx.descuento.create({
           data: {
             tarifaId: tarifa.id,
             porcentaje: t.descuento.porcentaje,
-            vigenciaDesde: t.descuento.vigenciaDesde ?? new Date(),
+            vigenciaDesde,
             vigenciaHasta: t.descuento.vigenciaHasta,
-            descripcion: t.descuento.descripcion,
+            descripcion: t.descuento.descripcion ?? anterior?.descripcion,
           },
         });
       }
@@ -293,7 +306,8 @@ organizadorRouter.put('/funciones/:id/estacionamiento', async (req, res) => {
       const reservados = actual ? await pasesActivos(tx, actual.id) : 0;
       if (!p.habilitada) {
         if (reservados) throw conflicto(`${playa.nombre} ya tiene ${reservados} pases vendidos: no se puede deshabilitar`, 'PLAYA_CON_PASES');
-        if (actual) await tx.tarifaEstacionamiento.delete({ where: { id: actual.id } });
+        // No se borra: los pases anulados (reservas vencidas, reembolsos) la siguen referenciando
+        if (actual) await tx.tarifaEstacionamiento.update({ where: { id: actual.id }, data: { habilitada: false } });
         continue;
       }
       if (p.cupoHabilitado > playa.capacidadTotal) {
@@ -305,7 +319,7 @@ organizadorRouter.put('/funciones/:id/estacionamiento', async (req, res) => {
       await tx.tarifaEstacionamiento.upsert({
         where: { funcionId_playaId: { funcionId: funcion.id, playaId: playa.id } },
         create: { funcionId: funcion.id, playaId: playa.id, precio: p.precio, cupoHabilitado: p.cupoHabilitado },
-        update: { precio: p.precio, cupoHabilitado: p.cupoHabilitado },
+        update: { precio: p.precio, cupoHabilitado: p.cupoHabilitado, habilitada: true },
       });
     }
   });
