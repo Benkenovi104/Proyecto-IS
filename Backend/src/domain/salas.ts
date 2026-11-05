@@ -26,6 +26,27 @@ export interface MapaSala {
   sectores: SectorMapa[];
 }
 
+// La geometría se guarda en unidades de dibujo; el editor del frontend las muestra en metros (PX_POR_METRO)
+export const UNIDADES_POR_METRO = 20;
+export const PLANO_INICIAL = { ancho: 860, alto: 640 }; // 43 x 32 m, el default de la tabla Sala
+export const LIMITES_PLANO = { minimo: 10 * UNIDADES_POR_METRO, maximo: 300 * UNIDADES_POR_METRO };
+
+const metros = (unidades: number) => (unidades / UNIDADES_POR_METRO).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+export const medidasPlano = (ancho: number, alto: number) => `${metros(ancho)} x ${metros(alto)} m`;
+
+/** Escenario con el que nace una sala: centrado arriba y proporcionado al plano. */
+export function escenarioInicial(ancho: number, alto: number) {
+  const w = Math.min(500, Math.round(ancho * 0.6));
+  return { nombre: 'Escenario Principal', esBase: true, posX: Math.round((ancho - w) / 2), posY: Math.min(24, Math.round(alto * 0.04)), ancho: w, alto: Math.min(105, Math.round(alto * 0.2)) };
+}
+
+type ElementoPlano = { nombre: string; posX: number; posY: number; ancho: number; alto: number };
+/** Primer escenario o sector que no entra en un plano de esas medidas (margen para el redondeo de los decimales). */
+export function fueraDelPlano(elementos: ElementoPlano[], ancho: number, alto: number) {
+  const margen = 0.01;
+  return elementos.find((e) => e.posX < -margen || e.posY < -margen || e.posX + e.ancho > ancho + margen || e.posY + e.alto > alto + margen);
+}
+
 /** Matriz de butacas con posición relativa dentro del sector. */
 export function matrizButacas(sectorId: number, filas: number, butacasPorFila: number) {
   const butacas = [];
@@ -88,6 +109,8 @@ export async function guardarMapa(salaId: number, mapa: MapaSala) {
   await prisma.$transaction(async (tx) => {
     const sala = await tx.sala.findUnique({ where: { id: salaId }, include: { sectores: true, escenarios: true } });
     if (!sala) throw noEncontrado('La sala no existe');
+    const fuera = fueraDelPlano([mapa.escenario, ...mapa.sectores], sala.ancho, sala.alto);
+    if (fuera) throw solicitudInvalida(`"${fuera.nombre}" queda fuera del plano de la sala (${medidasPlano(sala.ancho, sala.alto)})`, 'FUERA_DEL_PLANO');
 
     const base = sala.escenarios.find((e) => e.esBase) ?? sala.escenarios[0];
     if (base) {

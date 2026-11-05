@@ -7,7 +7,7 @@ Implementación funcional del **Caso Integrador** de Ingeniería de Software ([C
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS 3 (tokens del design system *Nocturne Velocity*) |
 | Backend | Node.js + Express 5 + TypeScript |
 | Base de datos | SQLite con Prisma ORM (migraciones + seed) |
-| Pruebas | `node:test` (23 pruebas de integración contra la API real) |
+| Pruebas | `node:test` (24 pruebas de integración contra la API real) |
 
 ## Puesta en marcha
 
@@ -51,7 +51,7 @@ Con `DEMO_MODE=true` (lo deja activado el `.env` que crea `npm run setup`; sin e
 4. **Organizador**: editar tarifas y descuentos, habilitar playas y cupos, cargar productos y ver las métricas en vivo. En la segunda función de Cosquín (en borrador), activar "Publicar" muestra qué sectores no tienen precio.
 
 > Las fechas de las funciones del seed son **relativas al día en que se carga la base** (Stand-Up mañana, Cosquín dentro de 4 semanas, etc.). Antes de presentar, corré `npm run db:reset` para tener todo fresco.
-5. **Administrador**: arrastrar y redimensionar sectores en el editor, cambiar filas × butacas, agregar playas y gestionar lista negra y usuarios.
+5. **Administrador**: arrastrar y redimensionar sectores en el editor (todo en metros, con las medidas reales del predio), cambiar filas × butacas, agregar playas y gestionar lista negra y usuarios.
 
 ## Estructura del repositorio
 

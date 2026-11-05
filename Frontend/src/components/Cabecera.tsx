@@ -145,7 +145,8 @@ export function Cabecera({ subbarra }: { subbarra?: ReactNode }) {
                   <Icono nombre="expand_more" className="text-[18px] text-outline" />
                 </button>
                 {menu && (
-                  <div role="menu" className="absolute right-0 mt-2 w-60 animate-entrar rounded-lg border border-nv-line-strong bg-nv-raised p-1 shadow-z2" onMouseLeave={() => setMenu(false)}>
+                  // z-10: la subbarra tiene backdrop-blur (capa propia) y sin esto se pinta encima del menú
+                  <div role="menu" className="absolute right-0 z-10 mt-2 w-60 animate-entrar rounded-lg border border-nv-line-strong bg-nv-raised p-1 shadow-z2" onMouseLeave={() => setMenu(false)}>
                     <div className="border-b border-nv-line px-3 py-2">
                       <p className="text-label-md text-on-surface">{usuario.nombre}</p>
                       <p className="truncate text-body-sm text-outline">{usuario.email}</p>

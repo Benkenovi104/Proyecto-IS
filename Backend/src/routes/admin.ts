@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { autenticar, requiereRol, usuarioDe, usuarioPublico } from '../auth';
 import { prisma } from '../db';
-import { detalleSala, guardarMapa } from '../domain/salas';
+import { detalleSala, escenarioInicial, fueraDelPlano, guardarMapa, LIMITES_PLANO, medidasPlano, PLANO_INICIAL } from '../domain/salas';
 import { conflicto, idParam, noEncontrado, solicitudInvalida, validar } from '../lib/http';
 
 export const adminRouter = Router();
@@ -23,22 +23,32 @@ adminRouter.get('/salas/:id', async (req, res) => {
   res.json(await detalleSala(idParam(req.params.id)));
 });
 
+// Medidas del plano en unidades de dibujo (el editor las carga en metros)
+const medidaPlano = z
+  .number()
+  .int()
+  .min(LIMITES_PLANO.minimo, 'El plano tiene que medir al menos 10 m por lado')
+  .max(LIMITES_PLANO.maximo, 'El plano puede medir hasta 300 m por lado');
 const esquemaSala = z.object({
   nombre: z.string().trim().min(3),
   direccion: z.string().trim().min(3),
   capacidad: z.number().int().positive(),
+  ancho: medidaPlano.optional(),
+  alto: medidaPlano.optional(),
 });
 
 adminRouter.post('/salas', async (req, res) => {
-  const datos = validar(esquemaSala, req.body);
+  const { ancho = PLANO_INICIAL.ancho, alto = PLANO_INICIAL.alto, ...datos } = validar(esquemaSala, req.body);
   // Siguiente número después del mayor existente (contar salas repetía códigos: el seed arranca en VEN-042)
   const codigos = await prisma.sala.findMany({ select: { codigo: true } });
   const ultimo = Math.max(41, ...codigos.map((s) => Number(/^VEN-(\d+)$/.exec(s.codigo)?.[1] ?? 0)));
   const sala = await prisma.sala.create({
     data: {
       ...datos,
+      ancho,
+      alto,
       codigo: `VEN-${String(ultimo + 1).padStart(3, '0')}`,
-      escenarios: { create: { nombre: 'Escenario Principal', esBase: true, posX: 180, posY: 24, ancho: 500, alto: 105 } },
+      escenarios: { create: escenarioInicial(ancho, alto) },
     },
   });
   res.status(201).json(await detalleSala(sala.id));
@@ -47,6 +57,15 @@ adminRouter.post('/salas', async (req, res) => {
 adminRouter.patch('/salas/:id', async (req, res) => {
   const id = idParam(req.params.id);
   const datos = validar(esquemaSala.partial(), req.body);
+  if (datos.ancho !== undefined || datos.alto !== undefined) {
+    const sala = await prisma.sala.findUnique({ where: { id }, include: { escenarios: true, sectores: true } });
+    if (!sala) throw noEncontrado('La sala no existe');
+    const ancho = datos.ancho ?? sala.ancho;
+    const alto = datos.alto ?? sala.alto;
+    // Se revisan también las variantes de escenario que el organizador puede elegir por función
+    const fuera = fueraDelPlano([...sala.escenarios, ...sala.sectores], ancho, alto);
+    if (fuera) throw conflicto(`"${fuera.nombre}" quedaría fuera de un plano de ${medidasPlano(ancho, alto)}: movelo o achicalo antes`, 'PLANO_CHICO');
+  }
   await prisma.sala.update({ where: { id }, data: datos });
   res.json(await detalleSala(id));
 });

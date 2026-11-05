@@ -18,6 +18,18 @@ const paleta = (color: string) => PALETA[color] ?? PALETA.indigo;
 export const COLOR_SELECCION = '#2dd4bf';
 const COLOR_OCUPADA = '#334155';
 
+/** Unidades de dibujo por metro: la geometría se guarda en estas unidades y el editor la muestra en metros. */
+export const PX_POR_METRO = 20;
+
+/**
+ * Textos, márgenes y controles están pensados para un plano de 43 x 32 m (860 x 640). En predios de otra medida
+ * crecen o se achican en proporción, así el mapa se lee igual cuando se ajusta a la pantalla.
+ */
+export const escalaPlano = (ancho: number, alto: number) => Math.max(ancho / 860, alto / 640);
+
+/** Metros entre puntos de la cuadrícula: 1 m en el plano de referencia, más en predios grandes para que no se amontonen. */
+export const pasoCuadricula = (ancho: number, alto: number) => [1, 2, 5, 10, 20].find((m) => m >= 0.75 * escalaPlano(ancho, alto)) ?? 50;
+
 export interface SectorDibujo extends Geometria {
   id: number | string;
   nombre: string;
@@ -88,16 +100,21 @@ export function MapaSala(p: Props) {
   const edicion = p.modo === 'edicion';
   const e = p.escenario;
   const selEscenario = p.seleccionado === 'escenario';
+  const k = escalaPlano(p.ancho, p.alto);
+  const pad = { arriba: PAD.arriba * k, lados: PAD.lados * k, abajo: PAD.abajo * k };
+  // Cuadrícula: un punto por paso y una línea con referencia en metros cada 5 pasos
+  const paso = pasoCuadricula(p.ancho, p.alto) * PX_POR_METRO;
+  const guia = 5 * paso;
   const tirador = (x: number, y: number, id: number | string | 'escenario') =>
     edicion && p.seleccionado === id ? (
       <rect
-        x={x - 5}
-        y={y - 5}
-        width={10}
-        height={10}
+        x={x - 5 * k}
+        y={y - 5 * k}
+        width={10 * k}
+        height={10 * k}
         fill="#fff"
         stroke="#0284c7"
-        strokeWidth={1.5}
+        strokeWidth={1.5 * k}
         className="cursor-nwse-resize"
         onPointerDown={(ev) => p.onPointerDownElemento?.(ev, id, 'redimensionar')}
       />
@@ -106,14 +123,28 @@ export function MapaSala(p: Props) {
   return (
     <svg viewBox={`0 0 ${p.ancho} ${p.alto}`} className="h-full w-full select-none" role="img" aria-label="Mapa de la sala">
       {p.cuadricula && (
-        <>
+        <g className="pointer-events-none">
           <defs>
-            <pattern id="grilla" width="20" height="20" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill="rgba(99,102,241,0.18)" />
+            <pattern id="grilla" width={paso} height={paso} patternUnits="userSpaceOnUse">
+              <circle cx={k} cy={k} r={k} fill="rgba(99,102,241,0.18)" />
+            </pattern>
+            <pattern id="grilla-guia" width={guia} height={guia} patternUnits="userSpaceOnUse">
+              <path d={`M ${guia} 0 H 0 V ${guia}`} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={k} />
             </pattern>
           </defs>
           <rect width={p.ancho} height={p.alto} fill="url(#grilla)" />
-        </>
+          <rect width={p.ancho} height={p.alto} fill="url(#grilla-guia)" />
+          {Array.from({ length: Math.ceil(p.ancho / guia) - 1 }, (_, i) => (i + 1) * guia).map((x) => (
+            <text key={`x${x}`} x={x + 3 * k} y={10 * k} fill="#64748b" fontSize={9 * k}>
+              {x / PX_POR_METRO} m
+            </text>
+          ))}
+          {Array.from({ length: Math.ceil(p.alto / guia) - 1 }, (_, i) => (i + 1) * guia).map((y) => (
+            <text key={`y${y}`} x={3 * k} y={y - 3 * k} fill="#64748b" fontSize={9 * k}>
+              {y / PX_POR_METRO} m
+            </text>
+          ))}
+        </g>
       )}
 
       {/* Escenario */}
@@ -123,27 +154,27 @@ export function MapaSala(p: Props) {
         onClick={edicion ? () => p.onSeleccionar?.('escenario') : undefined}
       >
         <path
-          d={`M ${e.posX} ${e.posY + e.alto} L ${e.posX + e.ancho * 0.15} ${e.posY + e.alto + 18} L ${e.posX + e.ancho * 0.85} ${e.posY + e.alto + 18} L ${e.posX + e.ancho} ${e.posY + e.alto} Z`}
+          d={`M ${e.posX} ${e.posY + e.alto} L ${e.posX + e.ancho * 0.15} ${e.posY + e.alto + 18 * k} L ${e.posX + e.ancho * 0.85} ${e.posY + e.alto + 18 * k} L ${e.posX + e.ancho} ${e.posY + e.alto} Z`}
           fill="#1e1b4b"
           stroke="#818cf8"
-          strokeWidth={1.5}
+          strokeWidth={1.5 * k}
         />
         <rect
           x={e.posX}
           y={e.posY}
           width={e.ancho}
           height={e.alto}
-          rx={10}
+          rx={10 * k}
           fill="#312e81"
           stroke={selEscenario ? '#38bdf8' : '#818cf8'}
-          strokeWidth={selEscenario ? 3 : 2}
-          style={{ filter: 'drop-shadow(0 0 14px rgba(99,102,241,0.35))' }}
+          strokeWidth={(selEscenario ? 3 : 2) * k}
+          style={{ filter: `drop-shadow(0 0 ${14 * k}px rgba(99,102,241,0.35))` }}
         />
-        <text x={e.posX + e.ancho / 2} y={e.posY + e.alto / 2 + 5} fill="#fff" fontSize={14} fontWeight={700} letterSpacing={3} textAnchor="middle">
+        <text x={e.posX + e.ancho / 2} y={e.posY + e.alto / 2 + 5 * k} fill="#fff" fontSize={14 * k} fontWeight={700} letterSpacing={3 * k} textAnchor="middle">
           ESCENARIO
         </text>
         {edicion && (
-          <text x={e.posX + e.ancho / 2} y={e.posY + e.alto / 2 + 22} fill="#a5b4fc" fontSize={10} textAnchor="middle" opacity={0.8}>
+          <text x={e.posX + e.ancho / 2} y={e.posY + e.alto / 2 + 22 * k} fill="#a5b4fc" fontSize={10 * k} textAnchor="middle" opacity={0.8}>
             {e.nombre}
           </text>
         )}
@@ -156,18 +187,19 @@ export function MapaSala(p: Props) {
         const sel = edicion && p.seleccionado === s.id;
         const forma = contorno(s);
         const butacas = butacasDe(s);
-        const anchoInterno = s.ancho - PAD.lados * 2;
-        const altoInterno = s.alto - PAD.arriba - PAD.abajo;
-        const radio = s.numerado && butacas.length ? Math.max(2.5, Math.min(10, Math.min(anchoInterno / s.butacasPorFila, altoInterno / Math.max(1, s.filas)) * 0.38)) : 0;
+        const anchoInterno = s.ancho - pad.lados * 2;
+        const altoInterno = s.alto - pad.arriba - pad.abajo;
+        const radio = s.numerado && butacas.length ? Math.max(2.5 * k, Math.min(10 * k, Math.min(anchoInterno / s.butacasPorFila, altoInterno / Math.max(1, s.filas)) * 0.38)) : 0;
+        const angosto = s.ancho < 200 * k;
         const agotado = !edicion && s.disponibles === 0;
         const etiqueta = `${s.nombre.toUpperCase()}${!edicion && s.precio ? ` ($${s.precio.toLocaleString('es-AR')})` : ''}`;
         const clickSector = !edicion && !s.numerado && !agotado ? () => p.onSector?.(s) : undefined;
         const props = {
           fill: c.relleno,
           stroke: sel ? '#38bdf8' : c.borde,
-          strokeWidth: sel ? 3 : 1.5,
-          strokeDasharray: s.numerado ? undefined : '6 4',
-          style: sel ? { filter: 'drop-shadow(0 0 16px rgba(56,189,248,0.45))' } : undefined,
+          strokeWidth: (sel ? 3 : 1.5) * k,
+          strokeDasharray: s.numerado ? undefined : `${6 * k} ${4 * k}`,
+          style: sel ? { filter: `drop-shadow(0 0 ${16 * k}px rgba(56,189,248,0.45))` } : undefined,
         };
         return (
           <g key={s.id} opacity={agotado ? 0.5 : 1}>
@@ -180,19 +212,19 @@ export function MapaSala(p: Props) {
               aria-label={clickSector ? `Agregar una entrada de ${s.nombre}` : undefined}
               onKeyDown={clickSector ? conTeclado(clickSector) : undefined}
             >
-              {forma ? <path d={forma} {...props} /> : <rect x={s.posX} y={s.posY} width={s.ancho} height={s.alto} rx={10} {...props} />}
-              <text x={s.posX + s.ancho / 2} y={s.posY + 18} fill={c.texto} fontSize={s.ancho < 200 ? 9 : 11} fontWeight={700} textAnchor="middle">
-                {s.ancho < 200 ? s.nombre.toUpperCase() : etiqueta}
+              {forma ? <path d={forma} {...props} /> : <rect x={s.posX} y={s.posY} width={s.ancho} height={s.alto} rx={10 * k} {...props} />}
+              <text x={s.posX + s.ancho / 2} y={s.posY + 18 * k} fill={c.texto} fontSize={(angosto ? 9 : 11) * k} fontWeight={700} textAnchor="middle">
+                {angosto ? s.nombre.toUpperCase() : etiqueta}
               </text>
               {!s.numerado && (
                 <>
-                  <text x={s.posX + s.ancho / 2} y={s.posY + s.alto / 2 + 4} fill={c.texto} fontSize={11} textAnchor="middle" opacity={0.85}>
+                  <text x={s.posX + s.ancho / 2} y={s.posY + s.alto / 2 + 4 * k} fill={c.texto} fontSize={11 * k} textAnchor="middle" opacity={0.85}>
                     {edicion ? `Sector sin numerar · cupo ${s.cupo?.toLocaleString('es-AR') ?? ''}` : agotado ? 'AGOTADO' : 'Tocá para sumar una entrada (sin numerar)'}
                   </text>
                   {!edicion && !agotado && (
                     <>
-                      <rect x={s.posX + s.ancho / 2 - 60} y={s.posY + s.alto / 2 + 16} width={120} height={22} rx={4} fill={c.butaca} />
-                      <text x={s.posX + s.ancho / 2} y={s.posY + s.alto / 2 + 31} fill="#fff" fontSize={10} fontWeight={700} textAnchor="middle">
+                      <rect x={s.posX + s.ancho / 2 - 60 * k} y={s.posY + s.alto / 2 + 16 * k} width={120 * k} height={22 * k} rx={4 * k} fill={c.butaca} />
+                      <text x={s.posX + s.ancho / 2} y={s.posY + s.alto / 2 + 31 * k} fill="#fff" fontSize={10 * k} fontWeight={700} textAnchor="middle">
                         + Agregar entrada
                       </text>
                     </>
@@ -203,8 +235,8 @@ export function MapaSala(p: Props) {
 
             {/* Butacas */}
             {butacas.map((b) => {
-              const cx = s.posX + PAD.lados + b.posX * anchoInterno;
-              const cy = s.posY + PAD.arriba + b.posY * altoInterno;
+              const cx = s.posX + pad.lados + b.posX * anchoInterno;
+              const cy = s.posY + pad.arriba + b.posY * altoInterno;
               const mia = p.seleccionadas?.has(b.id);
               const ocupada = b.ocupada && !mia;
               const elegir = !edicion && !ocupada ? () => p.onButaca?.(s, b.id) : undefined;
@@ -226,11 +258,11 @@ export function MapaSala(p: Props) {
                     r={radio}
                     fill={mia ? COLOR_SELECCION : ocupada ? COLOR_OCUPADA : c.butaca}
                     stroke={mia ? '#99f6e4' : 'none'}
-                    strokeWidth={mia ? 2 : 0}
+                    strokeWidth={mia ? 2 * k : 0}
                     className={elegir ? 'transition-[r] hover:brightness-125' : undefined}
                   />
-                  {radio >= 7 && (
-                    <text x={cx} y={cy + 3} fill={ocupada ? '#64748b' : '#fff'} fontSize={radio >= 9 ? 8 : 6.5} textAnchor="middle" className="pointer-events-none">
+                  {radio >= 7 * k && (
+                    <text x={cx} y={cy + 3 * k} fill={ocupada ? '#64748b' : '#fff'} fontSize={(radio >= 9 * k ? 8 : 6.5) * k} textAnchor="middle" className="pointer-events-none">
                       {ocupada ? 'X' : `${b.fila}${b.numero}`}
                     </text>
                   )}

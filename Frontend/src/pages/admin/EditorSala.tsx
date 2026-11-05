@@ -2,7 +2,7 @@
 // Dibujar escenario y definir sectores, cargar mapa de butacas y gestionar playas de estacionamiento.
 import { type FormEvent, type PointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { COLORES, MapaSala, PALETA, type SectorDibujo } from '../../components/MapaSala';
+import { COLORES, escalaPlano, MapaSala, PALETA, pasoCuadricula, PX_POR_METRO, type SectorDibujo } from '../../components/MapaSala';
 import { useToast } from '../../components/Toast';
 import { Aviso, Boton, Campo, Cargando, cx, Icono, Modal } from '../../components/ui';
 import { api, mensajeError } from '../../lib/api';
@@ -50,6 +50,24 @@ const deSala = (s: SalaDetalle): Mapa => ({
 
 const capacidad = (s: SectorEdit) => (s.numerado ? s.filas * s.butacasPorFila : s.cupoMaximo);
 const redondear = (v: number, paso: number) => Math.round(v / paso) * paso;
+
+// El administrador trabaja en metros; el mapa se guarda en unidades de dibujo (PX_POR_METRO por metro)
+const PASO_METROS = 0.5; // ↑/↓ en los campos y medida mínima tipeada
+const PLANO_METROS = { minimo: 10, maximo: 300 }; // por lado, igual que el backend
+/** Sin separador de miles: el valor también se muestra dentro de los campos editables. */
+const metros = (px: number, decimales = 2) => (px / PX_POR_METRO).toLocaleString('es-AR', { maximumFractionDigits: decimales, useGrouping: false });
+/** Acepta coma o punto decimal; NaN si está vacío o no es un número. */
+const leerMetros = (texto: string) => {
+  const valor = texto.trim().replace(',', '.');
+  return valor ? Number(valor) : NaN;
+};
+const metrosDelPlano = (m: number) => Number.isFinite(m) && m >= PLANO_METROS.minimo && m <= PLANO_METROS.maximo;
+
+/** Hasta dónde llega lo dibujado (escenario y sectores), para no achicar el plano por debajo. */
+function extension(m: Mapa) {
+  const elementos = [m.escenario, ...m.sectores];
+  return { ancho: Math.max(...elementos.map((e) => e.posX + e.ancho)), alto: Math.max(...elementos.map((e) => e.posY + e.alto)) };
+}
 
 export default function EditorSala() {
   const { id } = useParams();
@@ -108,6 +126,9 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
   }, [sala?.id, reiniciarHistorial]);
 
   const sinGuardar = historial.indice !== guardadoIndice;
+  // Proporción del predio respecto del plano de referencia: zoom, ajuste y tamaños por defecto la acompañan
+  const k = sala ? escalaPlano(sala.ancho, sala.alto) : 1;
+  const ajuste = sala ? pasoCuadricula(sala.ancho, sala.alto) / 2 : PASO_METROS;
 
   const aplicar = useCallback((cambio: (m: Mapa) => Mapa) => {
     setHistorial((h) => {
@@ -171,7 +192,7 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
     setCursor(p);
     const a = arrastre.current;
     if (!a || !sala) return;
-    const paso = cuadricula ? 10 : 1;
+    const paso = cuadricula ? ajuste * PX_POR_METRO : 1;
     const dx = p.x - a.inicio.x;
     const dy = p.y - a.inicio.y;
     const g =
@@ -183,8 +204,8 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
           }
         : {
             ...a.original,
-            ancho: Math.max(40, Math.min(sala.ancho - a.original.posX, redondear(a.original.ancho + dx, paso))),
-            alto: Math.max(30, Math.min(sala.alto - a.original.posY, redondear(a.original.alto + dy, paso))),
+            ancho: Math.max(40 * k, Math.min(sala.ancho - a.original.posX, redondear(a.original.ancho + dx, paso))),
+            alto: Math.max(30 * k, Math.min(sala.alto - a.original.posY, redondear(a.original.alto + dy, paso))),
           };
     setBorrador(
       a.id === 'escenario'
@@ -204,7 +225,8 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
 
   // ── Altas, bajas y guardado ──
   const nuevoSector = (forma: 'RECT' | 'TRAPECIO') => {
-    if (!mapa) return;
+    if (!mapa || !sala) return;
+    const medida = (v: number, limite: number) => Math.min(Math.round(v * k), limite);
     const n = mapa.sectores.length + 1;
     const id = `nuevo-${Date.now()}`;
     aplicar((m) => ({
@@ -222,10 +244,10 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
           butacasPorFila: 8,
           cupo: 16,
           cupoMaximo: 16,
-          posX: 40,
-          posY: 40,
-          ancho: 220,
-          alto: 110,
+          posX: medida(40, sala.ancho / 4),
+          posY: medida(40, sala.alto / 4),
+          ancho: medida(220, sala.ancho / 2),
+          alto: medida(110, sala.alto / 2),
           puertaAcceso: '',
           entradasEmitidas: 0,
         },
@@ -235,10 +257,14 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
   };
 
   const duplicar = (s: SectorEdit) => {
+    if (!sala) return;
     const id = `nuevo-${Date.now()}`;
+    // La copia se corre un poco, sin salirse del plano
+    const posX = Math.max(0, Math.min(s.posX + 30 * k, sala.ancho - s.ancho));
+    const posY = Math.max(0, Math.min(s.posY + 30 * k, sala.alto - s.alto));
     aplicar((m) => ({
       ...m,
-      sectores: [...m.sectores, { ...s, id, codigo: `${s.codigo}-B`, nombre: `${s.nombre} (copia)`, posX: Math.min(s.posX + 30, 800), posY: Math.min(s.posY + 30, 600), entradasEmitidas: 0 }],
+      sectores: [...m.sectores, { ...s, id, codigo: `${s.codigo}-B`, nombre: `${s.nombre} (copia)`, posX, posY, entradasEmitidas: 0 }],
     }));
     setSeleccion(id);
   };
@@ -362,39 +388,36 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
       <main className="flex flex-1 flex-col overflow-hidden xl:flex-row">
         {/* Panel izquierdo: datos de la sala y playas */}
         <aside className="w-full flex-shrink-0 space-y-3.5 overflow-y-auto border-nv-line bg-surface-container-lowest p-3.5 xl:w-[325px] xl:border-r">
-          <DatosSala sala={sala} onActualizada={setSala} onCambio={recargarSalas} />
+          <DatosSala sala={sala} mapa={visible} onActualizada={setSala} onCambio={recargarSalas} />
           <Playas sala={sala} onActualizada={setSala} />
         </aside>
 
         {/* Lienzo */}
         <section className="relative flex min-h-[560px] min-w-0 flex-1 flex-col bg-nv-canvas">
-          <div className="flex h-6 items-center justify-between border-b border-nv-line bg-surface-container-lowest px-8 font-mono text-[10px] text-outline">
-            {Array.from({ length: 10 }, (_, i) => (
-              <span key={i}>{Math.round((i * sala.ancho) / 9)}px</span>
-            ))}
-          </div>
           <div
             ref={svgRef}
-            className={cx('relative flex-1 overflow-auto p-8', cuadricula && 'cuadricula-cad')}
+            className="relative flex-1 overflow-auto p-8"
             onPointerMove={alMover}
             onPointerUp={alSoltar}
             onPointerLeave={alSoltar}
           >
             <div className="absolute right-4 top-2 z-10 flex items-center gap-2 rounded-md border border-nv-line-strong bg-surface-container-lowest/90 px-2.5 py-1 font-mono text-[11px] text-on-surface-variant backdrop-blur">
               <span className="h-2 w-2 rounded-full bg-cyan-400" />
-              Cursor: X=<strong className="text-white">{cursor.x}</strong>, Y=<strong className="text-white">{cursor.y}</strong>
-              <span className="text-outline">|</span> Escala: 1m = 25px
+              Cursor: X=<strong className="text-white">{metros(cursor.x, 1)} m</strong>, Y=<strong className="text-white">{metros(cursor.y, 1)} m</strong>
+              <span className="text-outline">|</span> {cuadricula ? `Ajuste: ${ajuste.toLocaleString('es-AR')} m` : 'Ajuste libre'}
             </div>
-            {/* Al 100% o menos el lienzo se ajusta al ancho disponible; con zoom mayor se desplaza */}
+            {/* Al 100% o menos el lienzo se ajusta al ancho disponible; con zoom mayor se desplaza. El 100% es relativo
+                al plano de referencia, así un predio grande no arranca gigante ni uno chico diminuto */}
             <div
               className="relative mx-auto mt-4 rounded-3xl border border-dashed border-indigo-500/30 bg-slate-950/40 p-2"
-              style={{ width: sala.ancho * zoom + 16, maxWidth: zoom <= 1 ? '100%' : undefined }}
+              style={{ width: (sala.ancho / k) * zoom + 16, maxWidth: zoom <= 1 ? '100%' : undefined }}
             >
               <div className="absolute -top-3 left-6 rounded border border-indigo-500/30 bg-nv-canvas px-2 font-mono text-[10px] uppercase tracking-wider text-indigo-400">
-                Perímetro de {sala.nombre} ({sala.ancho} x {sala.alto} px)
+                Perímetro de {sala.nombre} ({metros(sala.ancho, 1)} x {metros(sala.alto, 1)} m)
               </div>
               <MapaSala
                 modo="edicion"
+                cuadricula={cuadricula}
                 ancho={sala.ancho}
                 alto={sala.alto}
                 escenario={visible.escenario}
@@ -560,30 +583,83 @@ function Editor({ salaId, salas, recargarSalas }: { salaId: number; salas: SalaL
 }
 
 function GeometriaCampos({ g, onCambio }: { g: Geometria; onCambio: (g: Partial<Geometria>) => void }) {
-  const campo = (k: keyof Geometria, etiqueta: string) => (
-    <label>
-      <span className="text-[10px] text-outline">{etiqueta}</span>
-      <input type="number" className="campo-mono px-2 py-1 text-body-sm" value={Math.round(g[k])} onChange={(e) => onCambio({ [k]: Number(e.target.value) })} />
-    </label>
-  );
+  const campo = (k: keyof Geometria, etiqueta: string, minimo: number) => <CampoMetros etiqueta={etiqueta} px={g[k]} minimo={minimo} onCambio={(px) => onCambio({ [k]: px })} />;
   return (
     <div className="grid grid-cols-2 gap-2">
-      {campo('posX', 'Pos X (px)')}
-      {campo('posY', 'Pos Y (px)')}
-      {campo('ancho', 'Ancho (px)')}
-      {campo('alto', 'Alto (px)')}
+      {campo('posX', 'Pos X (m)', 0)}
+      {campo('posY', 'Pos Y (m)', 0)}
+      {campo('ancho', 'Ancho (m)', PASO_METROS)}
+      {campo('alto', 'Profundidad (m)', PASO_METROS)}
     </div>
   );
 }
 
-function DatosSala({ sala, onActualizada, onCambio }: { sala: SalaDetalle; onActualizada: (s: SalaDetalle) => void; onCambio: () => void }) {
+/** Medida en metros: acepta coma o punto decimal, y ↑/↓ suman o restan medio metro. */
+function CampoMetros({ etiqueta, px, minimo, onCambio }: { etiqueta: string; px: number; minimo: number; onCambio: (px: number) => void }) {
+  // Mientras se tipea se muestra el texto tal cual ("2," todavía no es un número); al salir, el valor del mapa
+  const [texto, setTexto] = useState<string | null>(null);
+  const fijar = (m: number) => {
+    if (!Number.isFinite(m) || m < minimo) return false;
+    onCambio(Math.round(m * PX_POR_METRO * 100) / 100);
+    return true;
+  };
+  return (
+    <label>
+      <span className="text-[10px] text-outline">{etiqueta}</span>
+      <input
+        inputMode="decimal"
+        className="campo-mono px-2 py-1 text-body-sm"
+        value={texto ?? metros(px)}
+        onFocus={() => setTexto(metros(px))}
+        onBlur={() => setTexto(null)}
+        onChange={(e) => {
+          setTexto(e.target.value);
+          fijar(leerMetros(e.target.value));
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const m = px / PX_POR_METRO + (e.key === 'ArrowUp' ? PASO_METROS : -PASO_METROS);
+          if (fijar(m)) setTexto(metros(m * PX_POR_METRO));
+        }}
+      />
+    </label>
+  );
+}
+
+const datosIniciales = (s: SalaDetalle) => ({ nombre: s.nombre, direccion: s.direccion, capacidad: String(s.capacidad), ancho: metros(s.ancho), alto: metros(s.alto) });
+// Redondeado hacia arriba a 10 cm: la medida mínima que se puede tipear sin dejar nada afuera
+const metrosMinimos = (px: number) => metros(Math.ceil(px / (PX_POR_METRO / 10) - 1e-6) * (PX_POR_METRO / 10), 1);
+
+function DatosSala({ sala, mapa, onActualizada, onCambio }: { sala: SalaDetalle; mapa: Mapa; onActualizada: (s: SalaDetalle) => void; onCambio: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ nombre: sala.nombre, direccion: sala.direccion, capacidad: String(sala.capacidad) });
-  useEffect(() => setF({ nombre: sala.nombre, direccion: sala.direccion, capacidad: String(sala.capacidad) }), [sala]);
+  const [f, setF] = useState(() => datosIniciales(sala));
+  useEffect(() => setF(datosIniciales(sala)), [sala]);
+  const ocupado = extension(mapa); // incluye lo dibujado sin guardar, que el backend todavía no conoce
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
+    const [anchoM, altoM] = [leerMetros(f.ancho), leerMetros(f.alto)];
+    if (!metrosDelPlano(anchoM) || !metrosDelPlano(altoM)) {
+      toast(`El plano mide entre ${PLANO_METROS.minimo} y ${PLANO_METROS.maximo} m por lado`, 'error');
+      return;
+    }
+    const ancho = Math.round(anchoM * PX_POR_METRO);
+    const alto = Math.round(altoM * PX_POR_METRO);
+    const cambiaPlano = ancho !== sala.ancho || alto !== sala.alto;
+    if (cambiaPlano && (ancho < ocupado.ancho - 0.01 || alto < ocupado.alto - 0.01)) {
+      toast(`Lo dibujado llega hasta ${metrosMinimos(ocupado.ancho)} x ${metrosMinimos(ocupado.alto)} m: movelo o achicalo antes de reducir el plano`, 'error');
+      return;
+    }
     try {
-      onActualizada(await api.patch<SalaDetalle>(`/admin/salas/${sala.id}`, { nombre: f.nombre, direccion: f.direccion, capacidad: Number(f.capacidad) }));
+      onActualizada(
+        await api.patch<SalaDetalle>(`/admin/salas/${sala.id}`, {
+          nombre: f.nombre,
+          direccion: f.direccion,
+          capacidad: Number(f.capacidad),
+          // Solo si cambian: así algo fuera de lugar en un plano viejo no impide editar el nombre
+          ...(cambiaPlano && { ancho, alto }),
+        }),
+      );
       onCambio();
       toast('Datos de la sala actualizados');
     } catch (err) {
@@ -608,6 +684,19 @@ function DatosSala({ sala, onActualizada, onCambio }: { sala: SalaDetalle; onAct
         <Campo etiqueta="Capacidad máxima legal (espectadores)">
           <input className="campo-mono py-1.5" required inputMode="numeric" value={f.capacidad} onChange={(e) => setF({ ...f, capacidad: e.target.value.replace(/\D/g, '') })} />
         </Campo>
+        <div>
+          <div className="grid grid-cols-2 gap-2">
+            <Campo etiqueta="Ancho del plano (m)">
+              <input className="campo-mono py-1.5" required inputMode="decimal" value={f.ancho} onChange={(e) => setF({ ...f, ancho: e.target.value })} />
+            </Campo>
+            <Campo etiqueta="Profundidad (m)">
+              <input className="campo-mono py-1.5" required inputMode="decimal" value={f.alto} onChange={(e) => setF({ ...f, alto: e.target.value })} />
+            </Campo>
+          </div>
+          <p className="mt-1 text-[10px] text-outline">
+            Lo dibujado llega hasta {metrosMinimos(ocupado.ancho)} x {metrosMinimos(ocupado.alto)} m
+          </p>
+        </div>
         <Boton type="submit" className="w-full" icono="sync">
           Actualizar datos sala
         </Boton>
@@ -745,15 +834,27 @@ function Playas({ sala, onActualizada }: { sala: SalaDetalle; onActualizada: (s:
 function ModalNuevaSala({ abierto, onCerrar, onCreada }: { abierto: boolean; onCerrar: () => void; onCreada: () => void }) {
   const toast = useToast();
   const navegar = useNavigate();
-  const [f, setF] = useState({ nombre: '', direccion: '', capacidad: '' });
+  const vacio = { nombre: '', direccion: '', capacidad: '', ancho: '43', alto: '32' };
+  const [f, setF] = useState(vacio);
   const crear = async (e: FormEvent) => {
     e.preventDefault();
+    const [anchoM, altoM] = [leerMetros(f.ancho), leerMetros(f.alto)];
+    if (!metrosDelPlano(anchoM) || !metrosDelPlano(altoM)) {
+      toast(`El plano mide entre ${PLANO_METROS.minimo} y ${PLANO_METROS.maximo} m por lado`, 'error');
+      return;
+    }
     try {
-      const sala = await api.post<SalaDetalle>('/admin/salas', { nombre: f.nombre, direccion: f.direccion, capacidad: Number(f.capacidad) });
+      const sala = await api.post<SalaDetalle>('/admin/salas', {
+        nombre: f.nombre,
+        direccion: f.direccion,
+        capacidad: Number(f.capacidad),
+        ancho: Math.round(anchoM * PX_POR_METRO),
+        alto: Math.round(altoM * PX_POR_METRO),
+      });
       toast('Sala creada con su escenario base. Ahora dibujá los sectores.');
       onCerrar();
       onCreada();
-      setF({ nombre: '', direccion: '', capacidad: '' });
+      setF(vacio);
       navegar(`/admin/salas/${sala.id}`);
     } catch (err) {
       toast(mensajeError(err), 'error');
@@ -771,6 +872,14 @@ function ModalNuevaSala({ abierto, onCerrar, onCreada }: { abierto: boolean; onC
         <Campo etiqueta="Capacidad máxima legal">
           <input className="campo-mono" required inputMode="numeric" value={f.capacidad} onChange={(e) => setF({ ...f, capacidad: e.target.value.replace(/\D/g, '') })} />
         </Campo>
+        <div className="grid grid-cols-2 gap-3">
+          <Campo etiqueta="Ancho del plano (m)" ayuda={`De ${PLANO_METROS.minimo} a ${PLANO_METROS.maximo} m`}>
+            <input className="campo-mono" required inputMode="decimal" value={f.ancho} onChange={(e) => setF({ ...f, ancho: e.target.value })} />
+          </Campo>
+          <Campo etiqueta="Profundidad (m)">
+            <input className="campo-mono" required inputMode="decimal" value={f.alto} onChange={(e) => setF({ ...f, alto: e.target.value })} />
+          </Campo>
+        </div>
         <div className="flex justify-end gap-2">
           <Boton variante="fantasma" onClick={onCerrar}>
             Cancelar

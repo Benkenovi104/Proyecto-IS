@@ -363,6 +363,31 @@ test('administrador: una sala nueva recibe un código libre', async () => {
   assert.equal(r.data.codigo, 'VEN-045');
 });
 
+test('administrador: las medidas del plano no dejan afuera lo dibujado', async () => {
+  const token = await login('admin@ticketfr.com', 'admin123');
+  // Sala de 12 x 10 m (20 unidades por metro): el escenario inicial se adapta al plano
+  const chica = await api('POST', '/admin/salas', { token, body: { nombre: 'Sala chica', direccion: 'Calle 456', capacidad: 80, ancho: 240, alto: 200 } });
+  assert.equal(chica.status, 201, JSON.stringify(chica.data));
+  const e = chica.data.escenario;
+  assert.ok(e.posX >= 0 && e.posX + e.ancho <= 240 && e.posY + e.alto <= 200, JSON.stringify(e));
+  const minima = await api('POST', '/admin/salas', { token, body: { nombre: 'Sala mínima', direccion: 'Calle 789', capacidad: 10, ancho: 100, alto: 200 } });
+  assert.equal(minima.status, 400);
+
+  const sala = await prisma.sala.findUniqueOrThrow({ where: { codigo: 'VEN-042' } });
+  const achicar = await api('PATCH', `/admin/salas/${sala.id}`, { token, body: { ancho: 600 } });
+  assert.equal(achicar.status, 409);
+  assert.equal(achicar.data.code, 'PLANO_CHICO');
+  const agrandar = await api('PATCH', `/admin/salas/${sala.id}`, { token, body: { ancho: 1200, alto: 900 } });
+  assert.equal(agrandar.status, 200, JSON.stringify(agrandar.data));
+  assert.deepEqual([agrandar.data.ancho, agrandar.data.alto], [1200, 900]);
+
+  const fuera = { escenario: agrandar.data.escenario, sectores: agrandar.data.sectores.map((s: any, i: number) => (i === 0 ? { ...s, posX: 1150 } : s)) };
+  const r = await api('PUT', `/admin/salas/${sala.id}/mapa`, { token, body: fuera });
+  assert.equal(r.status, 400);
+  assert.equal(r.data.code, 'FUERA_DEL_PLANO');
+  assert.equal((await api('PATCH', `/admin/salas/${sala.id}`, { token, body: { ancho: sala.ancho, alto: sala.alto } })).status, 200);
+});
+
 test('transferencia: aceptar dos veces a la vez no la deja cancelada', async () => {
   const lucas = await login('comprador@ticketfr.com');
   const t = await prisma.transferenciaEntrada.findFirstOrThrow({ where: { estado: 'PENDIENTE', destinatario: { email: 'comprador@ticketfr.com' } } });

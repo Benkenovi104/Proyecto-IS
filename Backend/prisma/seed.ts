@@ -191,7 +191,7 @@ async function main() {
     direccion: 'Av. Madero 420, Puerto Madero, CABA',
     capacidad: 15000,
     escenarios: [
-      { nombre: 'Escenario Principal (18m x 10m)', esBase: true, x: 180, y: 24, w: 500, h: 105 },
+      { nombre: 'Escenario Principal', esBase: true, x: 180, y: 24, w: 500, h: 105 },
       { nombre: 'Escenario v2 — Pasarela central', esBase: false, x: 230, y: 24, w: 400, h: 120 },
     ],
     sectores: [

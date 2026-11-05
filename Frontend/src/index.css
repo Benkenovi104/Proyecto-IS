@@ -76,14 +76,4 @@
   .etiqueta {
     @apply mb-1 block font-sans text-label-xs uppercase text-outline;
   }
-
-  /* Lienzo del editor de sala (patrón de cuadrícula de la pantalla 1 de Stitch) */
-  .cuadricula-cad {
-    background-color: #080c14;
-    background-image:
-      radial-gradient(circle, rgba(99, 102, 241, 0.18) 1px, transparent 1px),
-      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-    background-size: 20px 20px, 100px 100px, 100px 100px;
-  }
 }
